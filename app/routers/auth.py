@@ -1,7 +1,11 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.schemas import RegisterRequest, LoginRequest, RefreshRequest, AuthResponse, UserOut
 from app.supabase_client import anon_client, admin_client
 from app.dependencies import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -18,6 +22,7 @@ def register(payload: RegisterRequest):
             }
         )
     except Exception as exc:
+        logger.exception("sign_up failed for %s", payload.email)
         raise HTTPException(status_code=400, detail="Registration failed") from exc
 
     user = result.user
@@ -36,10 +41,11 @@ def register(payload: RegisterRequest):
             {"id": user.id, "full_name": payload.full_name}
         ).execute()
     except Exception as exc:
+        logger.exception("profile insert failed for user_id=%s", user.id)
         try:
             admin_client().auth.admin.delete_user(user.id)
         except Exception:
-            pass
+            logger.exception("rollback delete_user failed for user_id=%s", user.id)
         raise HTTPException(
             status_code=500, detail="Registration failed while creating profile"
         ) from exc
