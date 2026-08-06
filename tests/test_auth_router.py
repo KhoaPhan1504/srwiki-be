@@ -1,0 +1,151 @@
+from types import SimpleNamespace
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from app.routers import auth
+
+app = FastAPI()
+app.include_router(auth.router)
+client = TestClient(app)
+
+
+def test_register_success(mocker):
+    fake_anon = mocker.MagicMock()
+    fake_anon.auth.sign_up.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com", identities=[{"id": "ident-1"}]),
+        session=None,
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_anon)
+    fake_admin = mocker.MagicMock()
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "a@b.com", "password": "password123", "full_name": "A B"},
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {"id": "user-1", "email": "a@b.com"}
+    fake_admin.table.return_value.insert.assert_called_once_with(
+        {"id": "user-1", "full_name": "A B"}
+    )
+
+
+def test_register_rolls_back_user_when_profile_insert_fails(mocker):
+    fake_anon = mocker.MagicMock()
+    fake_anon.auth.sign_up.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com", identities=[{"id": "ident-1"}]),
+        session=None,
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_anon)
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.insert.return_value.execute.side_effect = Exception("db error")
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "a@b.com", "password": "password123", "full_name": "A B"},
+    )
+
+    assert response.status_code == 500
+    fake_admin.auth.admin.delete_user.assert_called_once_with("user-1")
+
+
+def test_register_existing_email_returns_409_without_touching_admin(mocker):
+    """GoTrue's anti-enumeration protection returns a fake user with no identities."""
+    fake_anon = mocker.MagicMock()
+    fake_anon.auth.sign_up.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com", identities=[]), session=None
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_anon)
+    mock_admin = mocker.patch("app.routers.auth.admin_client")
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "a@b.com", "password": "password123", "full_name": "A B"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Email already registered"
+    mock_admin.assert_not_called()
+
+
+def test_register_failure_returns_400_without_leaking_exception(mocker):
+    fake_anon = mocker.MagicMock()
+    fake_anon.auth.sign_up.side_effect = Exception("secret internal supabase error")
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_anon)
+
+    response = client.post(
+        "/auth/register",
+        json={"email": "a@b.com", "password": "password123", "full_name": "A B"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Registration failed"
+    assert "secret internal supabase error" not in response.text
+
+
+def test_login_success(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com"),
+        session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    response = client.post("/auth/login", json={"email": "a@b.com", "password": "password123"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "token": "access-tok",
+        "refreshToken": "refresh-tok",
+        "user": {"id": "user-1", "email": "a@b.com"},
+    }
+
+
+def test_login_invalid_credentials_returns_401(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.side_effect = Exception("Invalid login credentials")
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    response = client.post("/auth/login", json={"email": "a@b.com", "password": "wrong"})
+
+    assert response.status_code == 401
+
+
+def test_refresh_success(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.auth.refresh_session.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com"),
+        session=SimpleNamespace(access_token="new-access", refresh_token="new-refresh"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    response = client.post("/auth/refresh", json={"refreshToken": "old-refresh"})
+
+    assert response.status_code == 200
+    assert response.json()["token"] == "new-access"
+
+
+def test_refresh_invalid_token_returns_401(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.auth.refresh_session.side_effect = Exception("invalid refresh token")
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    response = client.post("/auth/refresh", json={"refreshToken": "bad"})
+
+    assert response.status_code == 401
+
+
+def test_logout_requires_auth():
+    response = client.post("/auth/logout")
+    assert response.status_code == 401
+
+
+def test_logout_success_with_valid_token(mocker):
+    mock_admin = mocker.patch("app.dependencies.admin_client")
+    fake_user = SimpleNamespace(id="user-1", email="a@b.com")
+    mock_admin.return_value.auth.get_user.return_value = SimpleNamespace(user=fake_user)
+
+    response = client.post("/auth/logout", headers={"Authorization": "Bearer good-token"})
+
+    assert response.status_code == 204

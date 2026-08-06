@@ -1,0 +1,113 @@
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, Depends, HTTPException, status
+from app.config import get_settings
+from app.dependencies import get_current_user
+from app.otp import generate_code
+from app.phone import validate_phone_e164, InvalidPhoneNumberError
+from app.schemas import ProfileOut, ProfileUpdateRequest, SendOtpRequest, VerifyOtpRequest
+from app.supabase_client import admin_client, user_client
+
+router = APIRouter(prefix="/profile", tags=["profile"])
+
+
+def _fetch_profile_row(client, user_id: str) -> dict:
+    result = client.table("profiles").select("*").eq("id", user_id).maybe_single().execute()
+    # postgrest-py returns None (not a response object) when zero rows match.
+    if result is None or not result.data:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return result.data
+
+
+@router.get("", response_model=ProfileOut)
+def get_profile(current_user: dict = Depends(get_current_user)):
+    client = user_client(current_user["access_token"])
+    row = _fetch_profile_row(client, current_user["id"])
+    return ProfileOut(email=current_user["email"], **row)
+
+
+@router.put("", response_model=ProfileOut)
+def update_profile(
+    payload: ProfileUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    client = user_client(current_user["access_token"])
+    updates = payload.model_dump(exclude_unset=True)
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    client.table("profiles").update(updates).eq("id", current_user["id"]).execute()
+    row = _fetch_profile_row(client, current_user["id"])
+    return ProfileOut(email=current_user["email"], **row)
+
+
+OTP_TTL_MINUTES = 5
+
+
+@router.post("/phone/send-otp")
+def send_otp(payload: SendOtpRequest, current_user: dict = Depends(get_current_user)):
+    try:
+        phone = validate_phone_e164(payload.phone)
+    except InvalidPhoneNumberError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    client = admin_client()
+    client.table("otp_codes").update({"consumed": True}).eq(
+        "user_id", current_user["id"]
+    ).eq("consumed", False).execute()
+
+    code = generate_code()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)).isoformat()
+    client.table("otp_codes").insert(
+        {
+            "user_id": current_user["id"],
+            "phone": phone,
+            "code": code,
+            "expires_at": expires_at,
+        }
+    ).execute()
+
+    response = {"message": "OTP sent"}
+    if get_settings().otp_debug_mode:
+        print(f"[OTP DEBUG] phone={phone} code={code}")
+        response["debug_otp"] = code
+    return response
+
+
+@router.post("/phone/verify-otp", response_model=ProfileOut)
+def verify_otp(payload: VerifyOtpRequest, current_user: dict = Depends(get_current_user)):
+    try:
+        phone = validate_phone_e164(payload.phone)
+    except InvalidPhoneNumberError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    admin = admin_client()
+    now = datetime.now(timezone.utc).isoformat()
+    result = (
+        admin.table("otp_codes")
+        .select("*")
+        .eq("user_id", current_user["id"])
+        .eq("phone", phone)
+        .eq("code", payload.code)
+        .eq("consumed", False)
+        .gte("expires_at", now)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=400, detail="Invalid or expired code")
+
+    otp_row = result.data[0]
+    admin.table("otp_codes").update({"consumed": True}).eq("id", otp_row["id"]).execute()
+
+    client = user_client(current_user["access_token"])
+    client.table("profiles").update(
+        {"phone": phone, "phone_verified": True, "updated_at": now}
+    ).eq("id", current_user["id"]).execute()
+
+    row = _fetch_profile_row(client, current_user["id"])
+    return ProfileOut(email=current_user["email"], **row)
+
+
+@router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+def delete_profile(current_user: dict = Depends(get_current_user)):
+    admin_client().auth.admin.delete_user(current_user["id"])
+    return None
