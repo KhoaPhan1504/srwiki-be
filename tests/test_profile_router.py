@@ -38,7 +38,7 @@ def test_get_profile_success(mocker):
 
     assert response.status_code == 200
     assert response.json()["email"] == "a@b.com"
-    assert response.json()["full_name"] == "A B"
+    assert response.json()["fullName"] == "A B"
 
 
 def test_get_profile_not_found(mocker):
@@ -59,7 +59,7 @@ def test_update_profile_sends_only_provided_fields(mocker):
     )
     mocker.patch("app.routers.profile.user_client", return_value=fake_client)
 
-    response = client.put("/profile", json={"full_name": "New Name"})
+    response = client.put("/profile", json={"fullName": "New Name"})
 
     assert response.status_code == 200
     update_call = fake_client.table.return_value.update.call_args[0][0]
@@ -87,7 +87,7 @@ def test_send_otp_success_returns_debug_code_in_debug_mode(mocker):
     response = client.post("/profile/phone/send-otp", json={"phone": "+84912345678"})
 
     assert response.status_code == 200
-    assert "debug_otp" in response.json()
+    assert "debugOtp" in response.json()
     fake_admin.table.return_value.insert.assert_called_once()
 
 
@@ -100,7 +100,7 @@ def test_send_otp_omits_debug_code_when_debug_mode_off(mocker):
     response = client.post("/profile/phone/send-otp", json={"phone": "+84912345678"})
 
     assert response.status_code == 200
-    assert "debug_otp" not in response.json()
+    assert "debugOtp" not in response.json()
 
 
 def test_verify_otp_success(mocker):
@@ -120,7 +120,7 @@ def test_verify_otp_success(mocker):
     )
 
     assert response.status_code == 200
-    assert response.json()["phone_verified"] is True
+    assert response.json()["phoneVerified"] is True
 
 
 def test_verify_otp_invalid_code_returns_400(mocker):

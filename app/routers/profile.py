@@ -4,7 +4,13 @@ from app.config import get_settings
 from app.dependencies import get_current_user
 from app.otp import generate_code
 from app.phone import validate_phone_e164, InvalidPhoneNumberError
-from app.schemas import ProfileOut, ProfileUpdateRequest, SendOtpRequest, VerifyOtpRequest
+from app.schemas import (
+    ProfileOut,
+    ProfileUpdateRequest,
+    SendOtpRequest,
+    SendOtpResponse,
+    VerifyOtpRequest,
+)
 from app.supabase_client import admin_client, user_client
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -41,7 +47,7 @@ def update_profile(
 OTP_TTL_MINUTES = 5
 
 
-@router.post("/phone/send-otp")
+@router.post("/phone/send-otp", response_model=SendOtpResponse, response_model_exclude_none=True)
 def send_otp(payload: SendOtpRequest, current_user: dict = Depends(get_current_user)):
     try:
         phone = validate_phone_e164(payload.phone)
@@ -64,10 +70,10 @@ def send_otp(payload: SendOtpRequest, current_user: dict = Depends(get_current_u
         }
     ).execute()
 
-    response = {"message": "OTP sent"}
+    response = SendOtpResponse(message="OTP sent")
     if get_settings().otp_debug_mode:
         print(f"[OTP DEBUG] phone={phone} code={code}")
-        response["debug_otp"] = code
+        response.debug_otp = code
     return response
 
 
