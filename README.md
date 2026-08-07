@@ -91,6 +91,7 @@ Dockerfile (e.g. Railway).
 | POST | `/auth/logout` | Bearer | |
 | GET | `/profile` | Bearer | |
 | PUT | `/profile` | Bearer | `{full_name?, address?, date_of_birth?}` — never accepts `phone` |
+| POST | `/profile/avatar` | Bearer | multipart `file` (png/jpeg/webp, ≤2MB) — uploads to Supabase Storage bucket `avatars`, updates `avatarUrl` |
 | POST | `/profile/phone/send-otp` | Bearer | `{phone}` in E.164 format |
 | POST | `/profile/phone/verify-otp` | Bearer | `{phone, code}` |
 | DELETE | `/profile` | Bearer | deletes the account |
