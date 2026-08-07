@@ -26,6 +26,5 @@ def admin_client() -> Client:
 
 def user_client(access_token: str) -> Client:
     settings = get_settings()
-    client = create_client(settings.supabase_url, settings.supabase_anon_key)
-    client.postgrest.auth(access_token)
-    return client
+    options = ClientOptions(headers={"Authorization": f"Bearer {access_token}"})
+    return create_client(settings.supabase_url, settings.supabase_anon_key, options=options)

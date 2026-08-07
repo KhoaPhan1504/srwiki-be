@@ -49,8 +49,7 @@ def test_user_client_attaches_access_token(mocker):
     result = sc.user_client("token-123")
 
     settings = get_settings()
-    # Must use the anon key, never the service-role key: RLS is what scopes
-    # this client to the token's user.
-    mock_create.assert_called_once_with(settings.supabase_url, settings.supabase_anon_key)
-    fake_client.postgrest.auth.assert_called_once_with("token-123")
+    args, kwargs = mock_create.call_args
+    assert args == (settings.supabase_url, settings.supabase_anon_key)
+    assert kwargs["options"].headers["Authorization"] == "Bearer token-123"
     assert result is fake_client
