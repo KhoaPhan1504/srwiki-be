@@ -1,8 +1,25 @@
+import warnings
 from datetime import date, datetime
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic.alias_generators import to_camel
+from pydantic.warnings import UnsupportedFieldAttributeWarning
+
+# FastAPI 0.115.x rebuilds each field as its own FieldInfo when flattening a
+# CamelModel-based request body for its internal TypeAdapter/OpenAPI schema
+# generation step. That rebuild re-presents the alias already produced by
+# alias_generator as if it had been passed to Field() directly, which trips
+# this warning for every field on every request — confirmed harmless (request
+# parsing and response serialization both behave correctly) via a minimal
+# repro; this is a known FastAPI/Pydantic interop wrinkle, not a bug here.
+warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
 
 
-class RegisterRequest(BaseModel):
+class CamelModel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class RegisterRequest(CamelModel):
     email: EmailStr
     password: str = Field(min_length=8)
     full_name: str = Field(min_length=1)
@@ -28,7 +45,7 @@ class AuthResponse(BaseModel):
     user: UserOut
 
 
-class ProfileOut(BaseModel):
+class ProfileOut(CamelModel):
     id: str
     email: EmailStr
     full_name: str | None = None
@@ -36,22 +53,46 @@ class ProfileOut(BaseModel):
     phone_verified: bool = False
     address: str | None = None
     date_of_birth: date | None = None
+    avatar_url: str | None = None
+    bio: str | None = None
     created_at: datetime
     updated_at: datetime
 
 
-class ProfileUpdateRequest(BaseModel):
+class ProfileUpdateRequest(CamelModel):
     model_config = ConfigDict(extra="forbid")
 
     full_name: str | None = Field(default=None, min_length=1)
     address: str | None = None
     date_of_birth: date | None = None
+    bio: str | None = None
 
 
 class SendOtpRequest(BaseModel):
     phone: str
 
 
+class SendOtpResponse(CamelModel):
+    message: str
+    debug_otp: str | None = None
+
+
 class VerifyOtpRequest(BaseModel):
     phone: str
     code: str = Field(min_length=6, max_length=6)
+
+
+class SettingsOut(CamelModel):
+    language: str
+    timezone: str
+    theme: Literal["light", "dark", "system"]
+    email_notifications: bool
+
+
+class SettingsUpdateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    language: str | None = None
+    timezone: str | None = None
+    theme: Literal["light", "dark", "system"] | None = None
+    email_notifications: bool | None = None

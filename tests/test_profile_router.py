@@ -38,7 +38,7 @@ def test_get_profile_success(mocker):
 
     assert response.status_code == 200
     assert response.json()["email"] == "a@b.com"
-    assert response.json()["full_name"] == "A B"
+    assert response.json()["fullName"] == "A B"
 
 
 def test_get_profile_not_found(mocker):
@@ -59,7 +59,7 @@ def test_update_profile_sends_only_provided_fields(mocker):
     )
     mocker.patch("app.routers.profile.user_client", return_value=fake_client)
 
-    response = client.put("/profile", json={"full_name": "New Name"})
+    response = client.put("/profile", json={"fullName": "New Name"})
 
     assert response.status_code == 200
     update_call = fake_client.table.return_value.update.call_args[0][0]
@@ -87,7 +87,7 @@ def test_send_otp_success_returns_debug_code_in_debug_mode(mocker):
     response = client.post("/profile/phone/send-otp", json={"phone": "+84912345678"})
 
     assert response.status_code == 200
-    assert "debug_otp" in response.json()
+    assert "debugOtp" in response.json()
     fake_admin.table.return_value.insert.assert_called_once()
 
 
@@ -100,7 +100,7 @@ def test_send_otp_omits_debug_code_when_debug_mode_off(mocker):
     response = client.post("/profile/phone/send-otp", json={"phone": "+84912345678"})
 
     assert response.status_code == 200
-    assert "debug_otp" not in response.json()
+    assert "debugOtp" not in response.json()
 
 
 def test_verify_otp_success(mocker):
@@ -120,7 +120,7 @@ def test_verify_otp_success(mocker):
     )
 
     assert response.status_code == 200
-    assert response.json()["phone_verified"] is True
+    assert response.json()["phoneVerified"] is True
 
 
 def test_verify_otp_invalid_code_returns_400(mocker):
@@ -144,3 +144,43 @@ def test_delete_profile_calls_admin_delete_user(mocker):
 
     assert response.status_code == 204
     fake_admin.auth.admin.delete_user.assert_called_once_with("user-1")
+
+
+def test_upload_avatar_success(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.storage.from_.return_value.get_public_url.return_value = (
+        "https://example.supabase.co/storage/v1/object/public/avatars/user-1/avatar"
+    )
+    fake_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data={**PROFILE_ROW, "avatar_url": "https://example.supabase.co/.../avatar"}
+    )
+    mocker.patch("app.routers.profile.user_client", return_value=fake_client)
+
+    response = client.post(
+        "/profile/avatar",
+        files={"file": ("avatar.png", b"fake-image-bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["avatarUrl"]
+    fake_client.storage.from_.return_value.upload.assert_called_once()
+    upload_args = fake_client.storage.from_.return_value.upload.call_args
+    assert upload_args[0][0] == "user-1/avatar"
+    assert upload_args[0][2] == {"content-type": "image/png", "upsert": "true"}
+
+
+def test_upload_avatar_rejects_invalid_content_type():
+    response = client.post(
+        "/profile/avatar",
+        files={"file": ("avatar.txt", b"not an image", "text/plain")},
+    )
+    assert response.status_code == 422
+
+
+def test_upload_avatar_rejects_oversized_file():
+    oversized = b"x" * (2 * 1024 * 1024 + 1)
+    response = client.post(
+        "/profile/avatar",
+        files={"file": ("avatar.png", oversized, "image/png")},
+    )
+    assert response.status_code == 422

@@ -1,10 +1,16 @@
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from app.config import get_settings
 from app.dependencies import get_current_user
 from app.otp import generate_code
 from app.phone import validate_phone_e164, InvalidPhoneNumberError
-from app.schemas import ProfileOut, ProfileUpdateRequest, SendOtpRequest, VerifyOtpRequest
+from app.schemas import (
+    ProfileOut,
+    ProfileUpdateRequest,
+    SendOtpRequest,
+    SendOtpResponse,
+    VerifyOtpRequest,
+)
 from app.supabase_client import admin_client, user_client
 
 router = APIRouter(prefix="/profile", tags=["profile"])
@@ -38,10 +44,40 @@ def update_profile(
     return ProfileOut(email=current_user["email"], **row)
 
 
+@router.post("/avatar", response_model=ProfileOut)
+def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    if file.content_type not in ALLOWED_AVATAR_CONTENT_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported image type")
+
+    content = file.file.read()
+    if len(content) > MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=422, detail="Image exceeds 2MB limit")
+
+    client = user_client(current_user["access_token"])
+    path = f"{current_user['id']}/avatar"
+    client.storage.from_("avatars").upload(
+        path, content, {"content-type": file.content_type, "upsert": "true"}
+    )
+    avatar_url = client.storage.from_("avatars").get_public_url(path)
+
+    now = datetime.now(timezone.utc).isoformat()
+    client.table("profiles").update({"avatar_url": avatar_url, "updated_at": now}).eq(
+        "id", current_user["id"]
+    ).execute()
+
+    row = _fetch_profile_row(client, current_user["id"])
+    return ProfileOut(email=current_user["email"], **row)
+
+
 OTP_TTL_MINUTES = 5
+ALLOWED_AVATAR_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp"}
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 
-@router.post("/phone/send-otp")
+@router.post("/phone/send-otp", response_model=SendOtpResponse, response_model_exclude_none=True)  # Exclude None so debugOtp doesn't leak into response when debug mode is off
 def send_otp(payload: SendOtpRequest, current_user: dict = Depends(get_current_user)):
     try:
         phone = validate_phone_e164(payload.phone)
@@ -64,10 +100,10 @@ def send_otp(payload: SendOtpRequest, current_user: dict = Depends(get_current_u
         }
     ).execute()
 
-    response = {"message": "OTP sent"}
+    response = SendOtpResponse(message="OTP sent")
     if get_settings().otp_debug_mode:
         print(f"[OTP DEBUG] phone={phone} code={code}")
-        response["debug_otp"] = code
+        response.debug_otp = code
     return response
 
 

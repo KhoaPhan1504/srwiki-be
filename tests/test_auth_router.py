@@ -20,7 +20,7 @@ def test_register_success(mocker):
 
     response = client.post(
         "/auth/register",
-        json={"email": "a@b.com", "password": "password123", "full_name": "A B"},
+        json={"email": "a@b.com", "password": "password123", "fullName": "A B"},
     )
 
     assert response.status_code == 201
@@ -43,7 +43,7 @@ def test_register_rolls_back_user_when_profile_insert_fails(mocker):
 
     response = client.post(
         "/auth/register",
-        json={"email": "a@b.com", "password": "password123", "full_name": "A B"},
+        json={"email": "a@b.com", "password": "password123", "fullName": "A B"},
     )
 
     assert response.status_code == 500
@@ -61,7 +61,7 @@ def test_register_existing_email_returns_409_without_touching_admin(mocker):
 
     response = client.post(
         "/auth/register",
-        json={"email": "a@b.com", "password": "password123", "full_name": "A B"},
+        json={"email": "a@b.com", "password": "password123", "fullName": "A B"},
     )
 
     assert response.status_code == 409
@@ -76,7 +76,7 @@ def test_register_failure_returns_400_without_leaking_exception(mocker):
 
     response = client.post(
         "/auth/register",
-        json={"email": "a@b.com", "password": "password123", "full_name": "A B"},
+        json={"email": "a@b.com", "password": "password123", "fullName": "A B"},
     )
 
     assert response.status_code == 400
