@@ -1,6 +1,17 @@
+import warnings
 from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from pydantic.alias_generators import to_camel
+from pydantic.warnings import UnsupportedFieldAttributeWarning
+
+# FastAPI 0.115.x rebuilds each field as its own FieldInfo when flattening a
+# CamelModel-based request body for its internal TypeAdapter/OpenAPI schema
+# generation step. That rebuild re-presents the alias already produced by
+# alias_generator as if it had been passed to Field() directly, which trips
+# this warning for every field on every request — confirmed harmless (request
+# parsing and response serialization both behave correctly) via a minimal
+# repro; this is a known FastAPI/Pydantic interop wrinkle, not a bug here.
+warnings.filterwarnings("ignore", category=UnsupportedFieldAttributeWarning)
 
 
 class CamelModel(BaseModel):

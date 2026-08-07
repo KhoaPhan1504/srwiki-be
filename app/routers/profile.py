@@ -47,7 +47,7 @@ def update_profile(
 OTP_TTL_MINUTES = 5
 
 
-@router.post("/phone/send-otp", response_model=SendOtpResponse, response_model_exclude_none=True)
+@router.post("/phone/send-otp", response_model=SendOtpResponse, response_model_exclude_none=True)  # Exclude None so debugOtp doesn't leak into response when debug mode is off
 def send_otp(payload: SendOtpRequest, current_user: dict = Depends(get_current_user)):
     try:
         phone = validate_phone_e164(payload.phone)
