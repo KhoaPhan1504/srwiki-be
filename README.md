@@ -83,6 +83,8 @@ Dockerfile (e.g. Railway).
 
 ## API overview
 
+All JSON fields are camelCase (e.g. `fullName`, not `full_name`).
+
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | POST | `/auth/register` | — | `{email, password, full_name}` |
@@ -90,8 +92,10 @@ Dockerfile (e.g. Railway).
 | POST | `/auth/refresh` | — | `{refreshToken}` |
 | POST | `/auth/logout` | Bearer | |
 | GET | `/profile` | Bearer | |
-| PUT | `/profile` | Bearer | `{full_name?, address?, date_of_birth?}` — never accepts `phone` |
+| PUT | `/profile` | Bearer | `{fullName?, address?, dateOfBirth?, bio?}` — never accepts `phone` |
 | POST | `/profile/avatar` | Bearer | multipart `file` (png/jpeg/webp, ≤2MB) — uploads to Supabase Storage bucket `avatars`, updates `avatarUrl` |
+| GET | `/settings` | Bearer | returns `{language, timezone, theme, emailNotifications}`, defaults if unset |
+| PUT | `/settings` | Bearer | any subset of the 4 settings fields — partial-merges into stored settings |
 | POST | `/profile/phone/send-otp` | Bearer | `{phone}` in E.164 format |
 | POST | `/profile/phone/verify-otp` | Bearer | `{phone, code}` |
 | DELETE | `/profile` | Bearer | deletes the account |

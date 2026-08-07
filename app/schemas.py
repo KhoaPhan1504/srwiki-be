@@ -1,5 +1,6 @@
 import warnings
 from datetime import date, datetime
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from pydantic.alias_generators import to_camel
 from pydantic.warnings import UnsupportedFieldAttributeWarning
@@ -79,3 +80,19 @@ class SendOtpResponse(CamelModel):
 class VerifyOtpRequest(BaseModel):
     phone: str
     code: str = Field(min_length=6, max_length=6)
+
+
+class SettingsOut(CamelModel):
+    language: str
+    timezone: str
+    theme: Literal["light", "dark", "system"]
+    email_notifications: bool
+
+
+class SettingsUpdateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    language: str | None = None
+    timezone: str | None = None
+    theme: Literal["light", "dark", "system"] | None = None
+    email_notifications: bool | None = None
