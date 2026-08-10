@@ -62,6 +62,17 @@ source .venv/bin/activate
 pytest -v
 ```
 
+## Git hooks
+
+```bash
+source .venv/bin/activate
+pre-commit install --hook-type pre-commit --hook-type commit-msg
+```
+
+Runs automatically on `git commit`: Black + Ruff format/lint staged `.py` files
+(blocking the commit on unresolved errors), and commitlint enforces
+`type: short description` commit messages (Conventional Commits).
+
 ## Docker
 
 ```bash
