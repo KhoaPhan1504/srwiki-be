@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -66,6 +67,25 @@ def test_update_profile_sends_only_provided_fields(mocker):
     assert update_call["full_name"] == "New Name"
     assert "address" not in update_call
     assert "phone" not in update_call
+
+
+def test_update_profile_sends_json_serializable_date_of_birth(mocker):
+    # Regression: payload.model_dump() without mode="json" used to leave
+    # date_of_birth as a datetime.date object, which postgrest-py's httpx
+    # transport can't JSON-encode, causing an unhandled 500 on every update
+    # that included a dateOfBirth.
+    fake_client = mocker.MagicMock()
+    fake_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data={**PROFILE_ROW, "date_of_birth": "2002-04-15"}
+    )
+    mocker.patch("app.routers.profile.user_client", return_value=fake_client)
+
+    response = client.put("/profile", json={"dateOfBirth": "2002-04-15"})
+
+    assert response.status_code == 200
+    update_call = fake_client.table.return_value.update.call_args[0][0]
+    assert update_call["date_of_birth"] == "2002-04-15"
+    json.dumps(update_call)  # must not raise TypeError
 
 
 def test_update_profile_rejects_phone_field():

@@ -37,7 +37,7 @@ def update_profile(
     current_user: dict = Depends(get_current_user),
 ):
     client = user_client(current_user["access_token"])
-    updates = payload.model_dump(exclude_unset=True)
+    updates = payload.model_dump(exclude_unset=True, mode="json")
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
     client.table("profiles").update(updates).eq("id", current_user["id"]).execute()
     row = _fetch_profile_row(client, current_user["id"])
