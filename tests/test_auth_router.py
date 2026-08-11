@@ -1,6 +1,8 @@
 from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from app.routers import auth
 
 app = FastAPI()
@@ -11,7 +13,9 @@ client = TestClient(app)
 def test_register_success(mocker):
     fake_anon = mocker.MagicMock()
     fake_anon.auth.sign_up.return_value = SimpleNamespace(
-        user=SimpleNamespace(id="user-1", email="a@b.com", identities=[{"id": "ident-1"}]),
+        user=SimpleNamespace(
+            id="user-1", email="a@b.com", identities=[{"id": "ident-1"}]
+        ),
         session=None,
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_anon)
@@ -33,12 +37,16 @@ def test_register_success(mocker):
 def test_register_rolls_back_user_when_profile_insert_fails(mocker):
     fake_anon = mocker.MagicMock()
     fake_anon.auth.sign_up.return_value = SimpleNamespace(
-        user=SimpleNamespace(id="user-1", email="a@b.com", identities=[{"id": "ident-1"}]),
+        user=SimpleNamespace(
+            id="user-1", email="a@b.com", identities=[{"id": "ident-1"}]
+        ),
         session=None,
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_anon)
     fake_admin = mocker.MagicMock()
-    fake_admin.table.return_value.insert.return_value.execute.side_effect = Exception("db error")
+    fake_admin.table.return_value.insert.return_value.execute.side_effect = Exception(
+        "db error"
+    )
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
 
     response = client.post(
@@ -92,7 +100,16 @@ def test_login_success(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    response = client.post("/auth/login", json={"email": "a@b.com", "password": "password123"})
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+    mocker.patch("app.routers.auth.create_notification")
+
+    response = client.post(
+        "/auth/login", json={"email": "a@b.com", "password": "password123"}
+    )
 
     assert response.status_code == 200
     assert response.json() == {
@@ -104,12 +121,76 @@ def test_login_success(mocker):
 
 def test_login_invalid_credentials_returns_401(mocker):
     fake_client = mocker.MagicMock()
-    fake_client.auth.sign_in_with_password.side_effect = Exception("Invalid login credentials")
+    fake_client.auth.sign_in_with_password.side_effect = Exception(
+        "Invalid login credentials"
+    )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    response = client.post("/auth/login", json={"email": "a@b.com", "password": "wrong"})
+    response = client.post(
+        "/auth/login", json={"email": "a@b.com", "password": "wrong"}
+    )
 
     assert response.status_code == 401
+
+
+def test_login_new_device_creates_known_login_and_notification(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com"),
+        session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+    mock_create_notification = mocker.patch("app.routers.auth.create_notification")
+
+    response = client.post(
+        "/auth/login",
+        json={"email": "a@b.com", "password": "password123"},
+        headers={"x-forwarded-for": "1.2.3.4", "user-agent": "TestAgent/1.0"},
+    )
+
+    assert response.status_code == 200
+    insert_call = fake_admin.table.return_value.insert.call_args[0][0]
+    assert insert_call["user_id"] == "user-1"
+    assert insert_call["ip_address"] == "1.2.3.4"
+    assert insert_call["user_agent"] == "TestAgent/1.0"
+    mock_create_notification.assert_called_once()
+    call_args = mock_create_notification.call_args[0]
+    assert call_args[0] == "user-1"
+    assert call_args[1] == "new_device_login"
+
+
+def test_login_known_device_updates_last_seen_without_notification(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com"),
+        session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data={"id": "kl-1"}
+    )
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+    mock_create_notification = mocker.patch("app.routers.auth.create_notification")
+
+    response = client.post(
+        "/auth/login",
+        json={"email": "a@b.com", "password": "password123"},
+        headers={"x-forwarded-for": "1.2.3.4", "user-agent": "TestAgent/1.0"},
+    )
+
+    assert response.status_code == 200
+    fake_admin.table.return_value.insert.assert_not_called()
+    update_call = fake_admin.table.return_value.update.call_args[0][0]
+    assert "last_seen_at" in update_call
+    mock_create_notification.assert_not_called()
 
 
 def test_refresh_success(mocker):
@@ -146,6 +227,8 @@ def test_logout_success_with_valid_token(mocker):
     fake_user = SimpleNamespace(id="user-1", email="a@b.com")
     mock_admin.return_value.auth.get_user.return_value = SimpleNamespace(user=fake_user)
 
-    response = client.post("/auth/logout", headers={"Authorization": "Bearer good-token"})
+    response = client.post(
+        "/auth/logout", headers={"Authorization": "Bearer good-token"}
+    )
 
     assert response.status_code == 204
