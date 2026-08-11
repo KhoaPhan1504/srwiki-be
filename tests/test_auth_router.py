@@ -165,6 +165,40 @@ def test_login_new_device_creates_known_login_and_notification(mocker):
     assert call_args[1] == "new_device_login"
 
 
+def test_login_new_device_insert_race_falls_back_to_update_without_notification(mocker):
+    """Two concurrent logins from the same new device both see 'no existing row',
+    but only one insert wins the unique (user_id, device_hash) constraint. The
+    loser must not surface a 500 — it should fall back to an update and skip
+    the notification (the winner sends it)."""
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com"),
+        session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
+    fake_admin.table.return_value.insert.return_value.execute.side_effect = Exception(
+        'duplicate key value violates unique constraint "known_logins_user_id_device_hash_key"'
+    )
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+    mock_create_notification = mocker.patch("app.routers.auth.create_notification")
+
+    response = client.post(
+        "/auth/login",
+        json={"email": "a@b.com", "password": "password123"},
+        headers={"x-forwarded-for": "1.2.3.4", "user-agent": "TestAgent/1.0"},
+    )
+
+    assert response.status_code == 200
+    update_call = fake_admin.table.return_value.update.call_args[0][0]
+    assert "last_seen_at" in update_call
+    mock_create_notification.assert_not_called()
+
+
 def test_login_known_device_updates_last_seen_without_notification(mocker):
     fake_client = mocker.MagicMock()
     fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(

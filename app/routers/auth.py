@@ -108,14 +108,30 @@ def _track_login_device(request: Request, user_id: str) -> None:
     )
     now = datetime.now(timezone.utc).isoformat()
     if existing is None or not existing.data:
-        admin.table("known_logins").insert(
-            {
-                "user_id": user_id,
-                "device_hash": device_hash,
-                "ip_address": ip,
-                "user_agent": user_agent,
-            }
-        ).execute()
+        try:
+            admin.table("known_logins").insert(
+                {
+                    "user_id": user_id,
+                    "device_hash": device_hash,
+                    "ip_address": ip,
+                    "user_agent": user_agent,
+                }
+            ).execute()
+        except Exception:
+            # Lost a race to a concurrent login from the same new device: the
+            # unique (user_id, device_hash) constraint rejected our insert
+            # because another in-flight request already created the row.
+            # Treat this the same as an already-known device (update
+            # last_seen_at, no notification) instead of surfacing a 500 for
+            # what was otherwise a successful login.
+            logger.exception(
+                "known_logins insert lost race for user_id=%s; falling back to update",
+                user_id,
+            )
+            admin.table("known_logins").update({"last_seen_at": now}).eq(
+                "user_id", user_id
+            ).eq("device_hash", device_hash).execute()
+            return
         create_notification(
             user_id,
             "new_device_login",
