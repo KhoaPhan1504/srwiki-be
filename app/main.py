@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.config import get_settings
-from app.routers import auth, profile, settings
+from app.routers import auth, notifications, profile, settings
 
 
 def create_app() -> FastAPI:
@@ -17,6 +18,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(profile.router)
     app.include_router(settings.router)
+    app.include_router(notifications.router)
 
     @app.get("/health")
     def health():
