@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends
+
 from app.dependencies import get_current_user
+from app.notifications import create_notification
 from app.schemas import SettingsOut, SettingsUpdateRequest
 from app.supabase_client import user_client
 
@@ -41,12 +44,21 @@ def update_user_settings(
 ):
     client = user_client(current_user["access_token"])
     stored = _fetch_stored_settings(client, current_user["id"])
-    merged = {**stored, **payload.model_dump(exclude_unset=True)}
+    changes = payload.model_dump(exclude_unset=True)
+    merged = {**stored, **changes}
 
     now = datetime.now(timezone.utc).isoformat()
     client.table("user_settings").upsert(
         {"user_id": current_user["id"], "settings": merged, "updated_at": now},
         on_conflict="user_id",
     ).execute()
+
+    if changes:
+        create_notification(
+            current_user["id"],
+            "settings_updated",
+            "Cài đặt tài khoản đã được cập nhật",
+            "Bạn vừa thay đổi cài đặt tài khoản.",
+        )
 
     return SettingsOut(**{**DEFAULT_SETTINGS, **merged})

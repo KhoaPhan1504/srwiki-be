@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from app.routers import settings
+
 from app.dependencies import get_current_user
+from app.routers import settings
 
 app = FastAPI()
 app.include_router(settings.router)
@@ -18,7 +20,9 @@ client = TestClient(app)
 
 def test_get_settings_returns_defaults_when_no_row(mocker):
     fake_client = mocker.MagicMock()
-    fake_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = None
+    fake_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
     mocker.patch("app.routers.settings.user_client", return_value=fake_client)
 
     response = client.get("/settings")
@@ -55,6 +59,7 @@ def test_update_settings_merges_partial_payload(mocker):
         data={"settings": {"language": "en", "theme": "dark"}}
     )
     mocker.patch("app.routers.settings.user_client", return_value=fake_client)
+    mocker.patch("app.routers.settings.create_notification")
 
     response = client.put("/settings", json={"theme": "light"})
 
@@ -71,3 +76,34 @@ def test_update_settings_merges_partial_payload(mocker):
 def test_update_settings_rejects_invalid_theme():
     response = client.put("/settings", json={"theme": "purple"})
     assert response.status_code == 422
+
+
+def test_update_settings_creates_notification_when_payload_nonempty(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data={"settings": {"language": "en"}}
+    )
+    mocker.patch("app.routers.settings.user_client", return_value=fake_client)
+    mock_create_notification = mocker.patch("app.routers.settings.create_notification")
+
+    response = client.put("/settings", json={"theme": "dark"})
+
+    assert response.status_code == 200
+    mock_create_notification.assert_called_once()
+    args = mock_create_notification.call_args[0]
+    assert args[0] == "user-1"
+    assert args[1] == "settings_updated"
+
+
+def test_update_settings_no_notification_when_payload_empty(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data={"settings": {"language": "en"}}
+    )
+    mocker.patch("app.routers.settings.user_client", return_value=fake_client)
+    mock_create_notification = mocker.patch("app.routers.settings.create_notification")
+
+    response = client.put("/settings", json={})
+
+    assert response.status_code == 200
+    mock_create_notification.assert_not_called()
