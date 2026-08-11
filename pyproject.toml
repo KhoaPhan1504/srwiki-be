@@ -1,0 +1,5 @@
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection pattern relies on calling Depends()/File()/Query()
+# etc. in argument defaults; this is the documented, idiomatic usage and not the
+# mutable-default-argument bug B008 is meant to catch.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Query"]

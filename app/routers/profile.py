@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+
 from app.config import get_settings
 from app.dependencies import get_current_user
+from app.notifications import create_notification
 from app.otp import generate_code
-from app.phone import validate_phone_e164, InvalidPhoneNumberError
+from app.phone import InvalidPhoneNumberError, validate_phone_e164
 from app.schemas import (
     ProfileOut,
     ProfileUpdateRequest,
@@ -17,7 +20,9 @@ router = APIRouter(prefix="/profile", tags=["profile"])
 
 
 def _fetch_profile_row(client, user_id: str) -> dict:
-    result = client.table("profiles").select("*").eq("id", user_id).maybe_single().execute()
+    result = (
+        client.table("profiles").select("*").eq("id", user_id).maybe_single().execute()
+    )
     # postgrest-py returns None (not a response object) when zero rows match.
     if result is None or not result.data:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -67,6 +72,12 @@ def upload_avatar(
     client.table("profiles").update({"avatar_url": avatar_url, "updated_at": now}).eq(
         "id", current_user["id"]
     ).execute()
+    create_notification(
+        current_user["id"],
+        "avatar_updated",
+        "Ảnh đại diện đã được cập nhật",
+        "Bạn vừa đổi ảnh đại diện mới.",
+    )
 
     row = _fetch_profile_row(client, current_user["id"])
     return ProfileOut(email=current_user["email"], **row)
@@ -77,7 +88,9 @@ ALLOWED_AVATAR_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp"}
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 
-@router.post("/phone/send-otp", response_model=SendOtpResponse, response_model_exclude_none=True)  # Exclude None so debugOtp doesn't leak into response when debug mode is off
+@router.post(
+    "/phone/send-otp", response_model=SendOtpResponse, response_model_exclude_none=True
+)  # Exclude None so debugOtp doesn't leak into response when debug mode is off
 def send_otp(payload: SendOtpRequest, current_user: dict = Depends(get_current_user)):
     try:
         phone = validate_phone_e164(payload.phone)
@@ -90,7 +103,9 @@ def send_otp(payload: SendOtpRequest, current_user: dict = Depends(get_current_u
     ).eq("consumed", False).execute()
 
     code = generate_code()
-    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)).isoformat()
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)
+    ).isoformat()
     client.table("otp_codes").insert(
         {
             "user_id": current_user["id"],
@@ -108,7 +123,9 @@ def send_otp(payload: SendOtpRequest, current_user: dict = Depends(get_current_u
 
 
 @router.post("/phone/verify-otp", response_model=ProfileOut)
-def verify_otp(payload: VerifyOtpRequest, current_user: dict = Depends(get_current_user)):
+def verify_otp(
+    payload: VerifyOtpRequest, current_user: dict = Depends(get_current_user)
+):
     try:
         phone = validate_phone_e164(payload.phone)
     except InvalidPhoneNumberError as exc:
@@ -132,12 +149,20 @@ def verify_otp(payload: VerifyOtpRequest, current_user: dict = Depends(get_curre
         raise HTTPException(status_code=400, detail="Invalid or expired code")
 
     otp_row = result.data[0]
-    admin.table("otp_codes").update({"consumed": True}).eq("id", otp_row["id"]).execute()
+    admin.table("otp_codes").update({"consumed": True}).eq(
+        "id", otp_row["id"]
+    ).execute()
 
     client = user_client(current_user["access_token"])
     client.table("profiles").update(
         {"phone": phone, "phone_verified": True, "updated_at": now}
     ).eq("id", current_user["id"]).execute()
+    create_notification(
+        current_user["id"],
+        "phone_verified",
+        "Xác minh số điện thoại thành công",
+        f"Số điện thoại {phone} đã được xác minh.",
+    )
 
     row = _fetch_profile_row(client, current_user["id"])
     return ProfileOut(email=current_user["email"], **row)
@@ -146,4 +171,3 @@ def verify_otp(payload: VerifyOtpRequest, current_user: dict = Depends(get_curre
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
 def delete_profile(current_user: dict = Depends(get_current_user)):
     admin_client().auth.admin.delete_user(current_user["id"])
-    return None
