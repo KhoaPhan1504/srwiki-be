@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from postgrest.exceptions import APIError
 
 from app.routers import auth
 
@@ -181,8 +183,11 @@ def test_login_new_device_insert_race_falls_back_to_update_without_notification(
     fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
         None
     )
-    fake_admin.table.return_value.insert.return_value.execute.side_effect = Exception(
-        'duplicate key value violates unique constraint "known_logins_user_id_device_hash_key"'
+    fake_admin.table.return_value.insert.return_value.execute.side_effect = APIError(
+        {
+            "code": "23505",
+            "message": 'duplicate key value violates unique constraint "known_logins_user_id_device_hash_key"',
+        }
     )
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mock_create_notification = mocker.patch("app.routers.auth.create_notification")
@@ -196,6 +201,39 @@ def test_login_new_device_insert_race_falls_back_to_update_without_notification(
     assert response.status_code == 200
     update_call = fake_admin.table.return_value.update.call_args[0][0]
     assert "last_seen_at" in update_call
+    mock_create_notification.assert_not_called()
+
+
+def test_login_new_device_insert_unrelated_failure_propagates(mocker):
+    """An insert failure that is NOT the (user_id, device_hash) unique violation
+    (e.g. a bad service-role key, network blip, schema drift) must not be
+    silently swallowed as if it were the race — it should propagate so the
+    caller sees a loud failure instead of a fake 200 with no row written."""
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com"),
+        session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
+    fake_admin.table.return_value.insert.return_value.execute.side_effect = APIError(
+        {"code": "42501", "message": "permission denied for table known_logins"}
+    )
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+    mock_create_notification = mocker.patch("app.routers.auth.create_notification")
+
+    with pytest.raises(APIError):
+        client.post(
+            "/auth/login",
+            json={"email": "a@b.com", "password": "password123"},
+            headers={"x-forwarded-for": "1.2.3.4", "user-agent": "TestAgent/1.0"},
+        )
+
+    fake_admin.table.return_value.update.assert_not_called()
     mock_create_notification.assert_not_called()
 
 

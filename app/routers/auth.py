@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from postgrest.exceptions import APIError
 
 from app.dependencies import get_current_user
 from app.notifications import create_notification
@@ -117,14 +118,19 @@ def _track_login_device(request: Request, user_id: str) -> None:
                     "user_agent": user_agent,
                 }
             ).execute()
-        except Exception:
+        except APIError as exc:
+            if exc.code != "23505":
+                # Not a unique-violation on (user_id, device_hash) — some other
+                # failure (network blip, bad service-role key, schema drift).
+                # Let it propagate instead of silently faking success.
+                raise
             # Lost a race to a concurrent login from the same new device: the
             # unique (user_id, device_hash) constraint rejected our insert
             # because another in-flight request already created the row.
             # Treat this the same as an already-known device (update
             # last_seen_at, no notification) instead of surfacing a 500 for
             # what was otherwise a successful login.
-            logger.exception(
+            logger.info(
                 "known_logins insert lost race for user_id=%s; falling back to update",
                 user_id,
             )
