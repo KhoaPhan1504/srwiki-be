@@ -1,4 +1,5 @@
 import hashlib
+import ipaddress
 import logging
 from datetime import datetime, timezone
 
@@ -81,7 +82,10 @@ def login(payload: LoginRequest, request: Request):
     if session is None or user is None:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    _track_login_device(request, user.id)
+    try:
+        _track_login_device(request, user.id)
+    except Exception:
+        logger.exception("_track_login_device failed for user_id=%s", user.id)
 
     return AuthResponse(
         token=session.access_token,
@@ -90,12 +94,22 @@ def login(payload: LoginRequest, request: Request):
     )
 
 
+MAX_USER_AGENT_LENGTH = 500
+
+
 def _track_login_device(request: Request, user_id: str) -> None:
     forwarded_for = request.headers.get("x-forwarded-for", "")
     ip = forwarded_for.split(",")[0].strip() or (
         request.client.host if request.client else "unknown"
     )
-    user_agent = request.headers.get("user-agent", "unknown")
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        # Attacker/client-controlled header didn't parse as an IP — don't
+        # store or display an arbitrary string that merely looks like one.
+        ip = "unknown"
+
+    user_agent = request.headers.get("user-agent", "unknown")[:MAX_USER_AGENT_LENGTH]
     device_hash = hashlib.sha256(f"{ip}|{user_agent}".encode()).hexdigest()
 
     admin = admin_client()

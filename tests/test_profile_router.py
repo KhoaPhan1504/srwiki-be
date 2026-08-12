@@ -263,3 +263,61 @@ def test_upload_avatar_success_creates_notification(mocker):
     args = mock_create_notification.call_args[0]
     assert args[0] == "user-1"
     assert args[1] == "avatar_updated"
+
+
+def test_verify_otp_succeeds_even_if_notification_fails(mocker):
+    """Fix 1: the phone was already verified (otp consumed, profile updated)
+    before create_notification runs. If the notifications table/subsystem is
+    unavailable, the client must still get its normal success response
+    instead of an unhandled 500 that makes it look like verification failed
+    (which would be worse: the caller can't just retry with the same code,
+    since it's already been marked consumed)."""
+    fake_admin = mocker.MagicMock()
+    query = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.eq.return_value.gte.return_value.order.return_value.limit.return_value
+    )
+    query.execute.return_value = SimpleNamespace(data=[{"id": "otp-1"}])
+    mocker.patch("app.routers.profile.admin_client", return_value=fake_admin)
+
+    fake_user_client = mocker.MagicMock()
+    fake_user_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data={**PROFILE_ROW, "phone": "+84912345678", "phone_verified": True}
+    )
+    mocker.patch("app.routers.profile.user_client", return_value=fake_user_client)
+    mocker.patch(
+        "app.routers.profile.create_notification",
+        side_effect=Exception('relation "notifications" does not exist'),
+    )
+
+    response = client.post(
+        "/profile/phone/verify-otp", json={"phone": "+84912345678", "code": "123456"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["phoneVerified"] is True
+
+
+def test_upload_avatar_succeeds_even_if_notification_fails(mocker):
+    """Fix 1: the avatar was already uploaded and the profile row updated
+    before create_notification runs — a notification-subsystem failure must
+    not turn an otherwise-successful upload into a 500."""
+    fake_client = mocker.MagicMock()
+    fake_client.storage.from_.return_value.get_public_url.return_value = (
+        "https://example.supabase.co/storage/v1/object/public/avatars/user-1/avatar"
+    )
+    fake_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data={**PROFILE_ROW, "avatar_url": "https://example.supabase.co/.../avatar"}
+    )
+    mocker.patch("app.routers.profile.user_client", return_value=fake_client)
+    mocker.patch(
+        "app.routers.profile.create_notification",
+        side_effect=Exception('relation "notifications" does not exist'),
+    )
+
+    response = client.post(
+        "/profile/avatar",
+        files={"file": ("avatar.png", b"fake-image-bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["avatarUrl"]

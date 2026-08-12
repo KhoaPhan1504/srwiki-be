@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from postgrest.exceptions import APIError
@@ -204,11 +203,13 @@ def test_login_new_device_insert_race_falls_back_to_update_without_notification(
     mock_create_notification.assert_not_called()
 
 
-def test_login_new_device_insert_unrelated_failure_propagates(mocker):
+def test_login_new_device_insert_unrelated_failure_does_not_break_login(mocker):
     """An insert failure that is NOT the (user_id, device_hash) unique violation
-    (e.g. a bad service-role key, network blip, schema drift) must not be
-    silently swallowed as if it were the race — it should propagate so the
-    caller sees a loud failure instead of a fake 200 with no row written."""
+    (e.g. a bad service-role key, network blip, schema drift) is a device-tracking
+    side effect, not the login itself. login() wraps the whole
+    _track_login_device() call as best-effort, so the failure must be logged
+    and swallowed rather than surfacing as an unhandled 500 for a login that
+    already succeeded."""
     fake_client = mocker.MagicMock()
     fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
         user=SimpleNamespace(id="user-1", email="a@b.com"),
@@ -226,15 +227,38 @@ def test_login_new_device_insert_unrelated_failure_propagates(mocker):
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mock_create_notification = mocker.patch("app.routers.auth.create_notification")
 
-    with pytest.raises(APIError):
-        client.post(
-            "/auth/login",
-            json={"email": "a@b.com", "password": "password123"},
-            headers={"x-forwarded-for": "1.2.3.4", "user-agent": "TestAgent/1.0"},
-        )
+    response = client.post(
+        "/auth/login",
+        json={"email": "a@b.com", "password": "password123"},
+        headers={"x-forwarded-for": "1.2.3.4", "user-agent": "TestAgent/1.0"},
+    )
 
+    assert response.status_code == 200
     fake_admin.table.return_value.update.assert_not_called()
     mock_create_notification.assert_not_called()
+
+
+def test_login_track_device_failure_does_not_break_login(mocker):
+    """Fix 1: if the notification subsystem/known_logins table is unavailable
+    (e.g. migrations not yet applied), login() must still return its normal
+    200 response — only the best-effort device-tracking side effect may fail."""
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com"),
+        session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+    mocker.patch(
+        "app.routers.auth._track_login_device",
+        side_effect=Exception('relation "known_logins" does not exist'),
+    )
+
+    response = client.post(
+        "/auth/login", json={"email": "a@b.com", "password": "password123"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["token"] == "access-tok"
 
 
 def test_login_known_device_updates_last_seen_without_notification(mocker):
@@ -263,6 +287,71 @@ def test_login_known_device_updates_last_seen_without_notification(mocker):
     update_call = fake_admin.table.return_value.update.call_args[0][0]
     assert "last_seen_at" in update_call
     mock_create_notification.assert_not_called()
+
+
+def test_login_malformed_forwarded_for_falls_back_to_unknown_ip(mocker):
+    """Fix 4: x-forwarded-for is fully client-controlled. A value that doesn't
+    parse as a valid IP must not be stored/displayed verbatim — fall back to
+    "unknown" instead of trusting an arbitrary attacker-controlled string."""
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com"),
+        session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+    mock_create_notification = mocker.patch("app.routers.auth.create_notification")
+
+    response = client.post(
+        "/auth/login",
+        json={"email": "a@b.com", "password": "password123"},
+        headers={
+            "x-forwarded-for": "<script>not-an-ip</script>",
+            "user-agent": "TestAgent/1.0",
+        },
+    )
+
+    assert response.status_code == 200
+    insert_call = fake_admin.table.return_value.insert.call_args[0][0]
+    assert insert_call["ip_address"] == "unknown"
+    call_kwargs = mock_create_notification.call_args
+    assert "unknown" in call_kwargs[0][3]  # message text
+    assert call_kwargs[1]["metadata"]["ip"] == "unknown"
+
+
+def test_login_oversized_user_agent_gets_truncated(mocker):
+    """Fix 4: user-agent is fully client-controlled with no length bound from
+    the browser/HTTP spec. Cap it before it's written to known_logins or
+    passed into create_notification's metadata."""
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="a@b.com"),
+        session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+    mocker.patch("app.routers.auth.create_notification")
+
+    oversized_agent = "A" * 10_000
+    response = client.post(
+        "/auth/login",
+        json={"email": "a@b.com", "password": "password123"},
+        headers={"x-forwarded-for": "1.2.3.4", "user-agent": oversized_agent},
+    )
+
+    assert response.status_code == 200
+    insert_call = fake_admin.table.return_value.insert.call_args[0][0]
+    assert len(insert_call["user_agent"]) == auth.MAX_USER_AGENT_LENGTH
 
 
 def test_refresh_success(mocker):

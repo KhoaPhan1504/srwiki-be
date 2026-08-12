@@ -55,12 +55,14 @@ def test_mark_notification_read_updates_row(mocker):
     )
     mocker.patch("app.routers.notifications.user_client", return_value=fake_client)
 
-    response = client.patch("/notifications/n1/read")
+    response = client.patch("/notifications/11111111-1111-1111-1111-111111111111/read")
 
     assert response.status_code == 200
     assert response.json()["readAt"] is not None
     # Verify both id and user scoping filters were applied
-    fake_client.table.return_value.update.return_value.eq.assert_called_with("id", "n1")
+    fake_client.table.return_value.update.return_value.eq.assert_called_with(
+        "id", "11111111-1111-1111-1111-111111111111"
+    )
     fake_client.table.return_value.update.return_value.eq.return_value.eq.assert_called_with(
         "user_id", "user-1"
     )
@@ -73,16 +75,22 @@ def test_mark_notification_read_missing_returns_404(mocker):
     )
     mocker.patch("app.routers.notifications.user_client", return_value=fake_client)
 
-    response = client.patch("/notifications/missing/read")
+    response = client.patch("/notifications/22222222-2222-2222-2222-222222222222/read")
 
     assert response.status_code == 404
     # Verify both id and user scoping filters were applied
     fake_client.table.return_value.update.return_value.eq.assert_called_with(
-        "id", "missing"
+        "id", "22222222-2222-2222-2222-222222222222"
     )
     fake_client.table.return_value.update.return_value.eq.return_value.eq.assert_called_with(
         "user_id", "user-1"
     )
+
+
+def test_mark_notification_read_rejects_non_uuid_returns_422():
+    response = client.patch("/notifications/not-a-uuid/read")
+
+    assert response.status_code == 422
 
 
 def test_mark_all_notifications_read_returns_count(mocker):

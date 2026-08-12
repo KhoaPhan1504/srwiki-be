@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -15,6 +16,8 @@ from app.schemas import (
     VerifyOtpRequest,
 )
 from app.supabase_client import admin_client, user_client
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/profile", tags=["profile"])
 
@@ -72,12 +75,18 @@ def upload_avatar(
     client.table("profiles").update({"avatar_url": avatar_url, "updated_at": now}).eq(
         "id", current_user["id"]
     ).execute()
-    create_notification(
-        current_user["id"],
-        "avatar_updated",
-        "Ảnh đại diện đã được cập nhật",
-        "Bạn vừa đổi ảnh đại diện mới.",
-    )
+    try:
+        create_notification(
+            current_user["id"],
+            "avatar_updated",
+            "Ảnh đại diện đã được cập nhật",
+            "Bạn vừa đổi ảnh đại diện mới.",
+        )
+    except Exception:
+        logger.exception(
+            "create_notification failed for user_id=%s (avatar_updated)",
+            current_user["id"],
+        )
 
     row = _fetch_profile_row(client, current_user["id"])
     return ProfileOut(email=current_user["email"], **row)
@@ -157,12 +166,18 @@ def verify_otp(
     client.table("profiles").update(
         {"phone": phone, "phone_verified": True, "updated_at": now}
     ).eq("id", current_user["id"]).execute()
-    create_notification(
-        current_user["id"],
-        "phone_verified",
-        "Xác minh số điện thoại thành công",
-        f"Số điện thoại {phone} đã được xác minh.",
-    )
+    try:
+        create_notification(
+            current_user["id"],
+            "phone_verified",
+            "Xác minh số điện thoại thành công",
+            f"Số điện thoại {phone} đã được xác minh.",
+        )
+    except Exception:
+        logger.exception(
+            "create_notification failed for user_id=%s (phone_verified)",
+            current_user["id"],
+        )
 
     row = _fetch_profile_row(client, current_user["id"])
     return ProfileOut(email=current_user["email"], **row)
