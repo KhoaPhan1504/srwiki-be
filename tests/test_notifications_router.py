@@ -42,6 +42,10 @@ def test_list_notifications_returns_rows(mocker):
     assert len(body) == 1
     assert body[0]["type"] == "phone_verified"
     assert body[0]["readAt"] is None
+    # Verify user scoping filter was applied
+    fake_client.table.return_value.select.return_value.eq.assert_called_with(
+        "user_id", "user-1"
+    )
 
 
 def test_mark_notification_read_updates_row(mocker):
@@ -55,6 +59,11 @@ def test_mark_notification_read_updates_row(mocker):
 
     assert response.status_code == 200
     assert response.json()["readAt"] is not None
+    # Verify both id and user scoping filters were applied
+    fake_client.table.return_value.update.return_value.eq.assert_called_with("id", "n1")
+    fake_client.table.return_value.update.return_value.eq.return_value.eq.assert_called_with(
+        "user_id", "user-1"
+    )
 
 
 def test_mark_notification_read_missing_returns_404(mocker):
@@ -67,6 +76,13 @@ def test_mark_notification_read_missing_returns_404(mocker):
     response = client.patch("/notifications/missing/read")
 
     assert response.status_code == 404
+    # Verify both id and user scoping filters were applied
+    fake_client.table.return_value.update.return_value.eq.assert_called_with(
+        "id", "missing"
+    )
+    fake_client.table.return_value.update.return_value.eq.return_value.eq.assert_called_with(
+        "user_id", "user-1"
+    )
 
 
 def test_mark_all_notifications_read_returns_count(mocker):
@@ -80,3 +96,10 @@ def test_mark_all_notifications_read_returns_count(mocker):
 
     assert response.status_code == 200
     assert response.json() == {"markedCount": 2}
+    # Verify user scoping and unread filters were applied
+    fake_client.table.return_value.update.return_value.eq.assert_called_with(
+        "user_id", "user-1"
+    )
+    fake_client.table.return_value.update.return_value.eq.return_value.is_.assert_called_with(
+        "read_at", "null"
+    )
