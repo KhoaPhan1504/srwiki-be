@@ -1,6 +1,7 @@
 import warnings
 from datetime import date, datetime
 from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from pydantic.alias_generators import to_camel
 from pydantic.warnings import UnsupportedFieldAttributeWarning
@@ -96,3 +97,17 @@ class SettingsUpdateRequest(CamelModel):
     timezone: str | None = None
     theme: Literal["light", "dark", "system"] | None = None
     email_notifications: bool | None = None
+
+
+class NotificationOut(CamelModel):
+    id: str
+    type: str
+    title: str
+    message: str
+    metadata: dict
+    read_at: datetime | None = None
+    created_at: datetime
+
+
+class MarkAllReadResponse(CamelModel):
+    marked_count: int
