@@ -9,7 +9,7 @@ from postgrest.exceptions import APIError
 from app.config import get_settings
 from app.dependencies import get_current_user
 from app.notifications import create_notification
-from app.permissions import get_role_id
+from app.permissions import RoleId
 from app.schemas import (
     AuthResponse,
     LoginRequest,
@@ -92,8 +92,7 @@ def _resolve_role_and_check_active(user_id: str, email: str) -> tuple[str, str |
         and email.lower() == target_super_admin_email.lower()
         and role != "super_admin"
     ):
-        super_admin_role_id = get_role_id(admin, "super_admin")
-        admin.table("profiles").update({"role_id": super_admin_role_id}).eq(
+        admin.table("profiles").update({"role_id": RoleId.SUPER_ADMIN}).eq(
             "id", user_id
         ).execute()
         role = "super_admin"

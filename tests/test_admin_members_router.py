@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.dependencies import get_current_user
+from app.permissions import RoleId
 from app.routers import admin_members
 
 app = FastAPI()
@@ -31,36 +32,13 @@ def _mock_role(mocker, role="admin", membership_tier=None, deleted_at=None):
     return mock_admin
 
 
-MEMBER_ROLE_ID = "role-member-id"
-ADMIN_ROLE_ID = "role-admin-id"
-
-
 def _fake_admin_client():
-    """admin_client() is queried against 2 different tables inside these
-    endpoints (profiles, roles). get_role_id() is called with different role
-    names within the same request (promote_member needs both 'member' and
-    'admin'), so the roles mock resolves per the queried name instead of
-    returning one fixed id. .table() needs a side_effect keyed by table name
-    so each table gets its own independently-configured mock chain instead
-    of colliding on a shared .table.return_value."""
+    """Role ids are fixed RoleId enum constants now (no more roles-table
+    lookup), so admin_client() is only ever queried against profiles."""
     fake_profiles = MagicMock()
-
-    fake_roles = MagicMock()
-
-    def _eq_side_effect(_column, role_name):
-        role_id = {"admin": ADMIN_ROLE_ID, "member": MEMBER_ROLE_ID}[role_name]
-        eq_result = MagicMock()
-        eq_result.maybe_single.return_value.execute.return_value = SimpleNamespace(
-            data={"id": role_id}
-        )
-        return eq_result
-
-    fake_roles.select.return_value.eq.side_effect = _eq_side_effect
-
     fake_admin = MagicMock()
-    tables = {"profiles": fake_profiles, "roles": fake_roles}
-    fake_admin.table.side_effect = lambda name: tables[name]
-    return fake_admin, fake_profiles, fake_roles
+    fake_admin.table.side_effect = lambda name: {"profiles": fake_profiles}[name]
+    return fake_admin, fake_profiles
 
 
 MEMBER_ROW = {
@@ -87,7 +65,7 @@ def test_list_members_rejects_non_admin(mocker):
 
 def test_list_members_returns_paginated_results(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     query = fake_profiles.select.return_value.eq.return_value.is_.return_value
     query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
         data=[MEMBER_ROW], count=1
@@ -103,12 +81,12 @@ def test_list_members_returns_paginated_results(mocker):
     assert body["pageSize"] == 20
     assert body["items"][0]["email"] == "member1@b.com"
     assert body["items"][0]["membershipTier"] == "regular"
-    fake_profiles.select.return_value.eq.assert_called_with("role_id", MEMBER_ROLE_ID)
+    fake_profiles.select.return_value.eq.assert_called_with("role_id", RoleId.MEMBER)
 
 
 def test_list_members_returns_empty_list_when_no_rows(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     query = fake_profiles.select.return_value.eq.return_value.is_.return_value
     query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
         data=[], count=0
@@ -125,7 +103,7 @@ def test_list_members_returns_empty_list_when_no_rows(mocker):
 
 def test_list_members_applies_pagination_params(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     query = fake_profiles.select.return_value.eq.return_value.is_.return_value
     query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
         data=[], count=0
@@ -143,7 +121,7 @@ def test_list_members_applies_pagination_params(mocker):
 
 def test_list_members_no_filter_skips_in_call(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     query = fake_profiles.select.return_value.eq.return_value.is_.return_value
     query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
         data=[], count=0
@@ -158,7 +136,7 @@ def test_list_members_no_filter_skips_in_call(mocker):
 
 def test_list_members_filters_by_single_membership_tier(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     base = fake_profiles.select.return_value.eq.return_value.is_.return_value
     base.in_.return_value.order.return_value.range.return_value.execute.return_value = (
         SimpleNamespace(data=[], count=0)
@@ -173,7 +151,7 @@ def test_list_members_filters_by_single_membership_tier(mocker):
 
 def test_list_members_filters_by_both_membership_tiers(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     base = fake_profiles.select.return_value.eq.return_value.is_.return_value
     base.in_.return_value.order.return_value.range.return_value.execute.return_value = (
         SimpleNamespace(data=[], count=0)
@@ -188,7 +166,7 @@ def test_list_members_filters_by_both_membership_tiers(mocker):
 
 def test_list_members_filters_created_at_range(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     base = fake_profiles.select.return_value.eq.return_value.is_.return_value
     base.gte.return_value.lt.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
         data=[], count=0
@@ -206,7 +184,7 @@ def test_list_members_filters_created_at_range(mocker):
 
 def test_list_members_filters_address_contains(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     base = fake_profiles.select.return_value.eq.return_value.is_.return_value
     base.ilike.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
         data=[], count=0
@@ -221,7 +199,7 @@ def test_list_members_filters_address_contains(mocker):
 
 def test_list_members_filters_birthday_range(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     base = fake_profiles.select.return_value.eq.return_value.is_.return_value
     base.gte.return_value.lte.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
         data=[], count=0
@@ -261,7 +239,7 @@ def test_list_members_invalid_created_at_range_returns_400(mocker):
 
 def test_list_members_combines_filters_with_and(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     base = fake_profiles.select.return_value.eq.return_value.is_.return_value
     base.in_.return_value.ilike.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
         data=[], count=0
@@ -307,7 +285,7 @@ def test_create_member_rejects_non_admin(mocker):
 
 def test_create_member_success(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     fake_admin.auth.admin.create_user.return_value = SimpleNamespace(
         user=SimpleNamespace(id="new-member-1", email="new@member.com")
     )
@@ -323,7 +301,7 @@ def test_create_member_success(mocker):
     assert body["role"] == "member"
     assert body["membershipTier"] == "regular"
     insert_call = fake_profiles.insert.call_args[0][0]
-    assert insert_call["role_id"] == MEMBER_ROLE_ID
+    assert insert_call["role_id"] == RoleId.MEMBER
     assert insert_call["membership_tier"] == "regular"
     assert insert_call["id"] == "new-member-1"
 
@@ -350,7 +328,7 @@ def test_create_member_rejects_membership_tier_field(mocker):
 
 def test_create_member_rolls_back_user_when_profile_insert_fails(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     fake_admin.auth.admin.create_user.return_value = SimpleNamespace(
         user=SimpleNamespace(id="new-member-1", email="new@member.com")
     )
@@ -374,7 +352,7 @@ def test_update_member_rejects_non_admin(mocker):
 
 def test_update_member_not_found_returns_404(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     fake_profiles.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute.return_value = (
         None
     )
@@ -387,7 +365,7 @@ def test_update_member_not_found_returns_404(mocker):
 
 def test_update_member_success(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     fetch_execute = (
         fake_profiles.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute
     )
@@ -416,7 +394,7 @@ def test_update_member_rejects_role_field(mocker):
 
 def test_update_member_no_changes_skips_update_call(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     fetch_execute = (
         fake_profiles.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute
     )
@@ -449,7 +427,7 @@ def test_delete_member_rejects_self_delete(mocker):
 
 def test_delete_member_not_found_returns_404(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     fake_profiles.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute.return_value = (
         None
     )
@@ -462,7 +440,7 @@ def test_delete_member_not_found_returns_404(mocker):
 
 def test_delete_member_success_soft_deletes(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     fake_profiles.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
         data=MEMBER_ROW
     )
@@ -478,7 +456,7 @@ def test_delete_member_success_soft_deletes(mocker):
 
 def test_deleted_member_excluded_from_list(mocker):
     _mock_role(mocker, role="admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     query = fake_profiles.select.return_value.eq.return_value.is_.return_value
     query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
         data=[], count=0
@@ -505,7 +483,7 @@ def test_promote_member_rejects_plain_admin(mocker):
 
 def test_promote_member_not_found_returns_404(mocker):
     _mock_role(mocker, role="super_admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     fake_profiles.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute.return_value = (
         None
     )
@@ -518,7 +496,7 @@ def test_promote_member_not_found_returns_404(mocker):
 
 def test_promote_member_success(mocker):
     _mock_role(mocker, role="super_admin")
-    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_admin, fake_profiles = _fake_admin_client()
     fetch_with_role_filter = (
         fake_profiles.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute
     )
@@ -538,4 +516,4 @@ def test_promote_member_success(mocker):
     assert body["role"] == "admin"
     assert "membershipTier" not in body
     update_call = fake_profiles.update.call_args[0][0]
-    assert update_call == {"role_id": ADMIN_ROLE_ID, "membership_tier": None}
+    assert update_call == {"role_id": RoleId.ADMIN, "membership_tier": None}

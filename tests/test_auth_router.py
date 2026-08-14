@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from postgrest.exceptions import APIError
 
+from app.permissions import RoleId
 from app.routers import auth
 
 app = FastAPI()
@@ -12,17 +13,11 @@ app.include_router(auth.router)
 client = TestClient(app)
 
 
-def _fake_admin_client(
-    *,
-    profile_data=None,
-    known_login_data=None,
-    super_admin_role_id="role-super-admin-id",
-):
-    """admin_client() is queried against 3 different tables inside
-    login()/refresh() (profiles, known_logins, roles — the last only when
-    bootstrap-promoting to super_admin). .table() needs a side_effect keyed
-    by table name so each table gets its own independently-configured mock
-    chain instead of colliding on a shared .table.return_value."""
+def _fake_admin_client(*, profile_data=None, known_login_data=None):
+    """admin_client() is queried against 2 different tables inside
+    login()/refresh() (profiles, known_logins). .table() needs a side_effect
+    keyed by table name so each table gets its own independently-configured
+    mock chain instead of colliding on a shared .table.return_value."""
     fake_profiles = MagicMock()
     fake_profiles.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
         SimpleNamespace(data=profile_data) if profile_data is not None else None
@@ -33,19 +28,13 @@ def _fake_admin_client(
         SimpleNamespace(data=known_login_data) if known_login_data is not None else None
     )
 
-    fake_roles = MagicMock()
-    fake_roles.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
-        data={"id": super_admin_role_id}
-    )
-
     fake_admin = MagicMock()
     tables = {
         "profiles": fake_profiles,
         "known_logins": fake_known_logins,
-        "roles": fake_roles,
     }
     fake_admin.table.side_effect = lambda name: tables[name]
-    return fake_admin, fake_profiles, fake_known_logins, fake_roles
+    return fake_admin, fake_profiles, fake_known_logins
 
 
 MEMBER_PROFILE = {
@@ -155,7 +144,7 @@ def test_login_success(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, _, _, _ = _fake_admin_client(profile_data=MEMBER_PROFILE)
+    fake_admin, _, _ = _fake_admin_client(profile_data=MEMBER_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch("app.routers.auth.create_notification")
 
@@ -201,7 +190,7 @@ def test_login_no_profile_row_defaults_to_member(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, _, _, _ = _fake_admin_client(profile_data=None)
+    fake_admin, _, _ = _fake_admin_client(profile_data=None)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch("app.routers.auth.create_notification")
 
@@ -222,7 +211,7 @@ def test_login_soft_deleted_account_returns_403(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, _, _, _ = _fake_admin_client(
+    fake_admin, _, _ = _fake_admin_client(
         profile_data={
             "role": "member",
             "membership_tier": "regular",
@@ -247,9 +236,7 @@ def test_login_promotes_initial_admin_email(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, fake_profiles, _, _ = _fake_admin_client(
-        profile_data=MEMBER_PROFILE, super_admin_role_id="role-super-admin-id"
-    )
+    fake_admin, fake_profiles, _ = _fake_admin_client(profile_data=MEMBER_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch("app.routers.auth.create_notification")
     fake_settings = mocker.MagicMock(initial_admin_email="boss@srwiki.dev")
@@ -262,7 +249,7 @@ def test_login_promotes_initial_admin_email(mocker):
     assert response.status_code == 200
     assert response.json()["user"]["role"] == "super_admin"
     update_call = fake_profiles.update.call_args[0][0]
-    assert update_call == {"role_id": "role-super-admin-id"}
+    assert update_call == {"role_id": RoleId.SUPER_ADMIN}
 
 
 def test_login_non_matching_email_does_not_promote(mocker):
@@ -273,7 +260,7 @@ def test_login_non_matching_email_does_not_promote(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, fake_profiles, _, _ = _fake_admin_client(profile_data=MEMBER_PROFILE)
+    fake_admin, fake_profiles, _ = _fake_admin_client(profile_data=MEMBER_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch("app.routers.auth.create_notification")
     fake_settings = mocker.MagicMock(initial_admin_email="boss@srwiki.dev")
@@ -296,9 +283,7 @@ def test_login_already_super_admin_does_not_reissue_update(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, fake_profiles, _, _ = _fake_admin_client(
-        profile_data=SUPER_ADMIN_PROFILE
-    )
+    fake_admin, fake_profiles, _ = _fake_admin_client(profile_data=SUPER_ADMIN_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch("app.routers.auth.create_notification")
     fake_settings = mocker.MagicMock(initial_admin_email="boss@srwiki.dev")
@@ -323,9 +308,7 @@ def test_login_plain_admin_still_gets_promoted_to_super_admin(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, fake_profiles, _, _ = _fake_admin_client(
-        profile_data=ADMIN_PROFILE, super_admin_role_id="role-super-admin-id"
-    )
+    fake_admin, fake_profiles, _ = _fake_admin_client(profile_data=ADMIN_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch("app.routers.auth.create_notification")
     fake_settings = mocker.MagicMock(initial_admin_email="boss@srwiki.dev")
@@ -338,7 +321,7 @@ def test_login_plain_admin_still_gets_promoted_to_super_admin(mocker):
     assert response.status_code == 200
     assert response.json()["user"]["role"] == "super_admin"
     update_call = fake_profiles.update.call_args[0][0]
-    assert update_call == {"role_id": "role-super-admin-id"}
+    assert update_call == {"role_id": RoleId.SUPER_ADMIN}
 
 
 def test_login_new_device_creates_known_login_and_notification(mocker):
@@ -349,9 +332,7 @@ def test_login_new_device_creates_known_login_and_notification(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, _, fake_known_logins, _ = _fake_admin_client(
-        profile_data=MEMBER_PROFILE
-    )
+    fake_admin, _, fake_known_logins = _fake_admin_client(profile_data=MEMBER_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mock_create_notification = mocker.patch("app.routers.auth.create_notification")
 
@@ -384,9 +365,7 @@ def test_login_new_device_insert_race_falls_back_to_update_without_notification(
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, _, fake_known_logins, _ = _fake_admin_client(
-        profile_data=MEMBER_PROFILE
-    )
+    fake_admin, _, fake_known_logins = _fake_admin_client(profile_data=MEMBER_PROFILE)
     fake_known_logins.insert.return_value.execute.side_effect = APIError(
         {
             "code": "23505",
@@ -419,9 +398,7 @@ def test_login_new_device_insert_unrelated_failure_does_not_break_login(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, _, fake_known_logins, _ = _fake_admin_client(
-        profile_data=MEMBER_PROFILE
-    )
+    fake_admin, _, fake_known_logins = _fake_admin_client(profile_data=MEMBER_PROFILE)
     fake_known_logins.insert.return_value.execute.side_effect = APIError(
         {"code": "42501", "message": "permission denied for table known_logins"}
     )
@@ -449,7 +426,7 @@ def test_login_track_device_failure_does_not_break_login(mocker):
         session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
-    fake_admin, _, _, _ = _fake_admin_client(profile_data=MEMBER_PROFILE)
+    fake_admin, _, _ = _fake_admin_client(profile_data=MEMBER_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch(
         "app.routers.auth._track_login_device",
@@ -472,7 +449,7 @@ def test_login_known_device_updates_last_seen_without_notification(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, _, fake_known_logins, _ = _fake_admin_client(
+    fake_admin, _, fake_known_logins = _fake_admin_client(
         profile_data=MEMBER_PROFILE, known_login_data={"id": "kl-1"}
     )
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
@@ -501,9 +478,7 @@ def test_login_malformed_forwarded_for_falls_back_to_unknown_ip(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, _, fake_known_logins, _ = _fake_admin_client(
-        profile_data=MEMBER_PROFILE
-    )
+    fake_admin, _, fake_known_logins = _fake_admin_client(profile_data=MEMBER_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mock_create_notification = mocker.patch("app.routers.auth.create_notification")
 
@@ -532,9 +507,7 @@ def test_login_oversized_user_agent_gets_truncated(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, _, fake_known_logins, _ = _fake_admin_client(
-        profile_data=MEMBER_PROFILE
-    )
+    fake_admin, _, fake_known_logins = _fake_admin_client(profile_data=MEMBER_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch("app.routers.auth.create_notification")
 
@@ -557,7 +530,7 @@ def test_refresh_success(mocker):
         session=SimpleNamespace(access_token="new-access", refresh_token="new-refresh"),
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
-    fake_admin, _, _, _ = _fake_admin_client(profile_data=MEMBER_PROFILE)
+    fake_admin, _, _ = _fake_admin_client(profile_data=MEMBER_PROFILE)
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
 
     response = client.post("/auth/refresh", json={"refreshToken": "old-refresh"})
@@ -584,7 +557,7 @@ def test_refresh_soft_deleted_account_returns_403(mocker):
         session=SimpleNamespace(access_token="new-access", refresh_token="new-refresh"),
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
-    fake_admin, _, _, _ = _fake_admin_client(
+    fake_admin, _, _ = _fake_admin_client(
         profile_data={
             "role": "member",
             "membership_tier": "regular",

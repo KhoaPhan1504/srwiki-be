@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.dependencies import require_permission
-from app.permissions import get_role_id
+from app.permissions import RoleId
 from app.schemas import (
     AdminCreateRequest,
     AdminListResponse,
@@ -33,12 +33,11 @@ def _to_admin_row(row: dict) -> dict:
 
 
 def _fetch_admin_row(admin, admin_id: str) -> dict | None:
-    admin_role_id = get_role_id(admin, "admin")
     result = (
         admin.table("profiles")
         .select("*, roles(name)")
         .eq("id", admin_id)
-        .eq("role_id", admin_role_id)
+        .eq("role_id", RoleId.ADMIN)
         .is_("deleted_at", "null")
         .maybe_single()
         .execute()
@@ -74,11 +73,10 @@ def list_admins(
     _current_user: dict = Depends(require_admins_read),
 ):
     admin = admin_client()
-    admin_role_id = get_role_id(admin, "admin")
     query = (
         admin.table("profiles")
         .select("*, roles(name)", count="exact")
-        .eq("role_id", admin_role_id)
+        .eq("role_id", RoleId.ADMIN)
         .is_("deleted_at", "null")
     )
     offset = (page - 1) * page_size
@@ -126,7 +124,7 @@ def create_admin(
         "date_of_birth": (
             payload.date_of_birth.isoformat() if payload.date_of_birth else None
         ),
-        "role_id": get_role_id(admin, "admin"),
+        "role_id": RoleId.ADMIN,
         "membership_tier": None,
     }
     try:
@@ -194,9 +192,8 @@ def demote_admin(
     if existing is None:
         raise HTTPException(status_code=404, detail="Admin not found")
 
-    member_role_id = get_role_id(admin, "member")
     admin.table("profiles").update(
-        {"role_id": member_role_id, "membership_tier": "regular"}
+        {"role_id": RoleId.MEMBER, "membership_tier": "regular"}
     ).eq("id", admin_id).execute()
 
     row = _fetch_profile_by_id(admin, admin_id)

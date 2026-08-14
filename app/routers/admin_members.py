@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.dependencies import require_permission
-from app.permissions import get_role_id
+from app.permissions import RoleId
 from app.schemas import (
     AdminOut,
     MemberCreateRequest,
@@ -33,12 +33,11 @@ def _to_member_row(row: dict) -> dict:
 
 
 def _fetch_member_row(admin, member_id: str) -> dict | None:
-    member_role_id = get_role_id(admin, "member")
     result = (
         admin.table("profiles")
         .select("*, roles(name)")
         .eq("id", member_id)
-        .eq("role_id", member_role_id)
+        .eq("role_id", RoleId.MEMBER)
         .is_("deleted_at", "null")
         .maybe_single()
         .execute()
@@ -89,11 +88,10 @@ def list_members(
         )
 
     admin = admin_client()
-    member_role_id = get_role_id(admin, "member")
     query = (
         admin.table("profiles")
         .select("*, roles(name)", count="exact")
-        .eq("role_id", member_role_id)
+        .eq("role_id", RoleId.MEMBER)
         .is_("deleted_at", "null")
     )
     if membership_tier:
@@ -157,7 +155,7 @@ def create_member(
         "date_of_birth": (
             payload.date_of_birth.isoformat() if payload.date_of_birth else None
         ),
-        "role_id": get_role_id(admin, "member"),
+        "role_id": RoleId.MEMBER,
         "membership_tier": "regular",
     }
     try:
@@ -228,9 +226,8 @@ def promote_member(
     if existing is None:
         raise HTTPException(status_code=404, detail="Member not found")
 
-    admin_role_id = get_role_id(admin, "admin")
     admin.table("profiles").update(
-        {"role_id": admin_role_id, "membership_tier": None}
+        {"role_id": RoleId.ADMIN, "membership_tier": None}
     ).eq("id", member_id).execute()
 
     row = _fetch_profile_by_id(admin, member_id)
