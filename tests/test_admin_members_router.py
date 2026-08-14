@@ -114,3 +114,151 @@ def test_list_members_applies_pagination_params(mocker):
     assert body["page"] == 3
     assert body["pageSize"] == 10
     query.order.return_value.range.assert_called_once_with(20, 29)
+
+
+def test_list_members_no_filter_skips_in_call(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    query = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.is_.return_value
+    )
+    query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/members")
+
+    assert response.status_code == 200
+    query.in_.assert_not_called()
+
+
+def test_list_members_filters_by_single_membership_tier(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    base = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.is_.return_value
+    )
+    base.in_.return_value.order.return_value.range.return_value.execute.return_value = (
+        SimpleNamespace(data=[], count=0)
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/members?membershipTier=vip")
+
+    assert response.status_code == 200
+    assert base.in_.call_args[0] == ("membership_tier", ["vip"])
+
+
+def test_list_members_filters_by_both_membership_tiers(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    base = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.is_.return_value
+    )
+    base.in_.return_value.order.return_value.range.return_value.execute.return_value = (
+        SimpleNamespace(data=[], count=0)
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/members?membershipTier=regular,vip")
+
+    assert response.status_code == 200
+    assert base.in_.call_args[0] == ("membership_tier", ["regular", "vip"])
+
+
+def test_list_members_filters_created_at_range(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    base = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.is_.return_value
+    )
+    base.gte.return_value.lt.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get(
+        "/admin/members?createdAtFrom=2026-01-01T00:00:00Z&createdAtTo=2026-08-15T00:00:00Z"
+    )
+
+    assert response.status_code == 200
+    assert base.gte.call_args[0][0] == "created_at"
+    assert base.gte.return_value.lt.call_args[0][0] == "created_at"
+
+
+def test_list_members_filters_address_contains(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    base = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.is_.return_value
+    )
+    base.ilike.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/members?address=Ha+Noi")
+
+    assert response.status_code == 200
+    assert base.ilike.call_args[0] == ("address", "%Ha Noi%")
+
+
+def test_list_members_filters_birthday_range(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    base = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.is_.return_value
+    )
+    base.gte.return_value.lte.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get(
+        "/admin/members?birthdayFrom=1990-01-01&birthdayTo=2000-12-31"
+    )
+
+    assert response.status_code == 200
+    assert base.gte.call_args[0][0] == "date_of_birth"
+    assert base.gte.return_value.lte.call_args[0][0] == "date_of_birth"
+
+
+def test_list_members_invalid_birthday_range_returns_400(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.get(
+        "/admin/members?birthdayFrom=2000-01-01&birthdayTo=1990-01-01"
+    )
+
+    assert response.status_code == 400
+
+
+def test_list_members_invalid_created_at_range_returns_400(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.get(
+        "/admin/members?createdAtFrom=2026-08-15T00:00:00Z&createdAtTo=2026-01-01T00:00:00Z"
+    )
+
+    assert response.status_code == 400
+
+
+def test_list_members_combines_filters_with_and(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    base = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.is_.return_value
+    )
+    base.in_.return_value.ilike.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/members?membershipTier=vip&address=Ha+Noi")
+
+    assert response.status_code == 200
+    assert base.in_.call_args[0] == ("membership_tier", ["vip"])
+    assert base.in_.return_value.ilike.call_args[0] == ("address", "%Ha Noi%")

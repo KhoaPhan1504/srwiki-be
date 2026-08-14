@@ -1,6 +1,7 @@
 import logging
+from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.dependencies import require_permission
 from app.schemas import MemberListResponse, MemberOut
@@ -35,8 +36,23 @@ def list_members(
     page_size: int = Query(
         default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, alias="pageSize"
     ),
+    membership_tier: str | None = Query(default=None, alias="membershipTier"),
+    created_at_from: datetime | None = Query(default=None, alias="createdAtFrom"),
+    created_at_to: datetime | None = Query(default=None, alias="createdAtTo"),
+    address: str | None = Query(default=None),
+    birthday_from: date | None = Query(default=None, alias="birthdayFrom"),
+    birthday_to: date | None = Query(default=None, alias="birthdayTo"),
     _current_user: dict = Depends(require_members_read),
 ):
+    if birthday_from and birthday_to and birthday_from > birthday_to:
+        raise HTTPException(
+            status_code=400, detail="birthdayFrom must be <= birthdayTo"
+        )
+    if created_at_from and created_at_to and created_at_from > created_at_to:
+        raise HTTPException(
+            status_code=400, detail="createdAtFrom must be <= createdAtTo"
+        )
+
     query = (
         admin_client()
         .table("profiles")
@@ -44,6 +60,21 @@ def list_members(
         .eq("role", "member")
         .is_("deleted_at", "null")
     )
+    if membership_tier:
+        tiers = [t.strip() for t in membership_tier.split(",") if t.strip()]
+        if tiers:
+            query = query.in_("membership_tier", tiers)
+    if created_at_from:
+        query = query.gte("created_at", created_at_from.isoformat())
+    if created_at_to:
+        query = query.lt("created_at", created_at_to.isoformat())
+    if address:
+        query = query.ilike("address", f"%{address}%")
+    if birthday_from:
+        query = query.gte("date_of_birth", birthday_from.isoformat())
+    if birthday_to:
+        query = query.lte("date_of_birth", birthday_to.isoformat())
+
     offset = (page - 1) * page_size
     result = (
         query.order("created_at", desc=True)
