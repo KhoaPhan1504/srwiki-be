@@ -1,5 +1,5 @@
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -22,6 +22,7 @@ MAX_PAGE_SIZE = 100
 require_members_read = require_permission("members.read")
 require_members_create = require_permission("members.create")
 require_members_update = require_permission("members.update")
+require_members_delete = require_permission("members.delete")
 
 
 def _fetch_member_row(admin, member_id: str) -> dict | None:
@@ -170,3 +171,20 @@ def update_member(
     if row is None:
         raise HTTPException(status_code=404, detail="Member not found")
     return MemberOut(**row)
+
+
+@router.delete("/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_member(
+    member_id: str,
+    current_user: dict = Depends(require_members_delete),
+):
+    if member_id == current_user["id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+
+    admin = admin_client()
+    existing = _fetch_member_row(admin, member_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    now = datetime.now(timezone.utc).isoformat()
+    admin.table("profiles").update({"deleted_at": now}).eq("id", member_id).execute()

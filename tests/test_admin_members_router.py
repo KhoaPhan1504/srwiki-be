@@ -418,3 +418,70 @@ def test_update_member_no_changes_skips_update_call(mocker):
 
     assert response.status_code == 200
     fake_admin.table.return_value.update.assert_not_called()
+
+
+def test_delete_member_rejects_non_admin(mocker):
+    _mock_role(mocker, role="member")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.delete("/admin/members/member-1")
+
+    assert response.status_code == 403
+
+
+def test_delete_member_rejects_self_delete(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.delete("/admin/members/admin-1")
+
+    assert response.status_code == 400
+
+
+def test_delete_member_not_found_returns_404(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.delete("/admin/members/missing")
+
+    assert response.status_code == 404
+
+
+def test_delete_member_success_soft_deletes(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data=MEMBER_ROW
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.delete("/admin/members/member-1")
+
+    assert response.status_code == 204
+    update_call = fake_admin.table.return_value.update.call_args[0][0]
+    assert "deleted_at" in update_call
+    fake_admin.auth.admin.delete_user.assert_not_called()
+
+
+def test_deleted_member_excluded_from_list(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    query = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.is_.return_value
+    )
+    query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/members")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == []
+    fake_admin.table.return_value.select.return_value.eq.return_value.is_.assert_called_with(
+        "deleted_at", "null"
+    )
