@@ -24,17 +24,27 @@ router = APIRouter(prefix="/profile", tags=["profile"])
 
 def _fetch_profile_row(client, user_id: str) -> dict:
     result = (
-        client.table("profiles").select("*").eq("id", user_id).maybe_single().execute()
+        client.table("profiles")
+        .select("*, roles(name)")
+        .eq("id", user_id)
+        .maybe_single()
+        .execute()
     )
     # postgrest-py returns None (not a response object) when zero rows match.
     if result is None or not result.data:
         raise HTTPException(status_code=404, detail="Profile not found")
+    row = dict(result.data)
     # profiles.email (migration 0008) is a denormalized copy for admin
     # listing/filtering — every caller here builds ProfileOut with the live
     # Supabase Auth token email instead (email=current_user["email"]), so
     # drop the column here rather than colliding with that kwarg below.
-    row = dict(result.data)
     row.pop("email", None)
+    # profiles.role_id (today's roles-table refactor) replaced the flat
+    # `role` text column — ProfileOut still expects a plain role name, so
+    # flatten the embedded roles(name) join the same way admin_members.py
+    # already does for MemberOut.
+    role_data = row.pop("roles")
+    row["role"] = role_data["name"]
     return row
 
 
