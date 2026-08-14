@@ -74,7 +74,7 @@ def test_register_success(mocker):
     assert response.status_code == 201
     assert response.json() == {"id": "user-1", "email": "a@b.com"}
     fake_admin.table.return_value.insert.assert_called_once_with(
-        {"id": "user-1", "full_name": "A B"}
+        {"id": "user-1", "email": "a@b.com", "full_name": "A B"}
     )
 
 

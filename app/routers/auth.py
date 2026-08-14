@@ -52,7 +52,7 @@ def register(payload: RegisterRequest):
 
     try:
         admin_client().table("profiles").insert(
-            {"id": user.id, "full_name": payload.full_name}
+            {"id": user.id, "email": user.email, "full_name": payload.full_name}
         ).execute()
     except Exception as exc:
         logger.exception("profile insert failed for user_id=%s", user.id)
