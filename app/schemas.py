@@ -58,6 +58,8 @@ class ProfileOut(CamelModel):
     date_of_birth: date | None = None
     avatar_url: str | None = None
     bio: str | None = None
+    role: Literal["admin", "member"]
+    membership_tier: Literal["regular", "vip"] | None = None
     created_at: datetime
     updated_at: datetime
 

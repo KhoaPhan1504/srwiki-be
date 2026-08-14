@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
-from app.schemas import RegisterRequest, ProfileUpdateRequest, ProfileOut
+
+from app.schemas import ProfileOut, ProfileUpdateRequest, RegisterRequest
 
 
 def test_register_request_accepts_valid_data():
@@ -49,6 +50,8 @@ def test_profile_out_serializes_with_camel_case_aliases():
         date_of_birth=None,
         avatar_url=None,
         bio=None,
+        role="member",
+        membership_tier="regular",
         created_at="2026-08-05T00:00:00Z",
         updated_at="2026-08-05T00:00:00Z",
     )
@@ -59,3 +62,4 @@ def test_profile_out_serializes_with_camel_case_aliases():
     assert dumped["createdAt"] is not None
     assert dumped["avatarUrl"] is None
     assert dumped["bio"] is None
+    assert dumped["membershipTier"] == "regular"
