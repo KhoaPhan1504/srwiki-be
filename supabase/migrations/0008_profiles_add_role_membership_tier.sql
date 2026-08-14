@@ -7,9 +7,10 @@ create table public.roles (
 );
 
 alter table public.roles enable row level security;
--- No policies: only service_role (admin_client, bypasses RLS) reads/writes
--- roles today — same "RLS enabled, zero policies" pattern used for
--- known_logins (0007) for a table clients never query directly.
+-- 0009 adds a select policy for `authenticated` — self-service endpoints
+-- (GET /profile and friends) read their own role name via the roles(name)
+-- embed through user_client(), not admin_client(), so roles can't be
+-- service-role-only the way known_logins (0007) is.
 
 -- Fixed (not random) ids so 'member' can be referenced as a column DEFAULT
 -- below — Postgres column defaults can't contain a subquery.
