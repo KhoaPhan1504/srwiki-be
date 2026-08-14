@@ -352,3 +352,69 @@ def test_create_member_rolls_back_user_when_profile_insert_fails(mocker):
 
     assert response.status_code == 500
     fake_admin.auth.admin.delete_user.assert_called_once_with("new-member-1")
+
+
+def test_update_member_rejects_non_admin(mocker):
+    _mock_role(mocker, role="member")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.put("/admin/members/member-1", json={"fullName": "New Name"})
+
+    assert response.status_code == 403
+
+
+def test_update_member_not_found_returns_404(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.put("/admin/members/missing", json={"fullName": "New Name"})
+
+    assert response.status_code == 404
+
+
+def test_update_member_success(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    fetch_execute = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute
+    )
+    fetch_execute.side_effect = [
+        SimpleNamespace(data=MEMBER_ROW),
+        SimpleNamespace(data={**MEMBER_ROW, "membership_tier": "vip"}),
+    ]
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.put("/admin/members/member-1", json={"membershipTier": "vip"})
+
+    assert response.status_code == 200
+    assert response.json()["membershipTier"] == "vip"
+    update_call = fake_admin.table.return_value.update.call_args[0][0]
+    assert update_call == {"membership_tier": "vip"}
+
+
+def test_update_member_rejects_role_field(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.put("/admin/members/member-1", json={"role": "admin"})
+
+    assert response.status_code == 422
+
+
+def test_update_member_no_changes_skips_update_call(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    fetch_execute = (
+        fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute
+    )
+    fetch_execute.return_value = SimpleNamespace(data=MEMBER_ROW)
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.put("/admin/members/member-1", json={})
+
+    assert response.status_code == 200
+    fake_admin.table.return_value.update.assert_not_called()

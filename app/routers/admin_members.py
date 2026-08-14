@@ -4,7 +4,12 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.dependencies import require_permission
-from app.schemas import MemberCreateRequest, MemberListResponse, MemberOut
+from app.schemas import (
+    MemberCreateRequest,
+    MemberListResponse,
+    MemberOut,
+    MemberUpdateRequest,
+)
 from app.supabase_client import admin_client
 
 logger = logging.getLogger(__name__)
@@ -16,6 +21,7 @@ MAX_PAGE_SIZE = 100
 
 require_members_read = require_permission("members.read")
 require_members_create = require_permission("members.create")
+require_members_update = require_permission("members.update")
 
 
 def _fetch_member_row(admin, member_id: str) -> dict | None:
@@ -142,4 +148,25 @@ def create_member(
         raise HTTPException(
             status_code=500, detail="Member created but could not be fetched"
         )
+    return MemberOut(**row)
+
+
+@router.put("/{member_id}", response_model=MemberOut)
+def update_member(
+    member_id: str,
+    payload: MemberUpdateRequest,
+    _current_user: dict = Depends(require_members_update),
+):
+    admin = admin_client()
+    existing = _fetch_member_row(admin, member_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    changes = payload.model_dump(exclude_unset=True, mode="json")
+    if changes:
+        admin.table("profiles").update(changes).eq("id", member_id).execute()
+
+    row = _fetch_member_row(admin, member_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Member not found")
     return MemberOut(**row)
