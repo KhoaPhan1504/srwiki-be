@@ -1,7 +1,25 @@
 from fastapi import HTTPException
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "admin": {"members.read", "members.create", "members.update", "members.delete"},
+    "super_admin": {
+        "members.read",
+        "members.create",
+        "members.update",
+        "members.delete",
+        "admins.read",
+        "admins.create",
+        "admins.update",
+        "admins.delete",
+        "admins.promote",
+        "admins.demote",
+    },
+    "admin": {
+        "members.read",
+        "members.create",
+        "members.update",
+        "members.delete",
+        "admins.read",
+    },
     "member": set(),
 }
 

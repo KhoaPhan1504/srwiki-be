@@ -20,6 +20,9 @@ class CamelModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+RoleName = Literal["super_admin", "admin", "member"]
+
+
 class RegisterRequest(CamelModel):
     email: EmailStr
     password: str = Field(min_length=8)
@@ -38,7 +41,7 @@ class RefreshRequest(BaseModel):
 class UserOut(CamelModel):
     id: str
     email: EmailStr
-    role: Literal["admin", "member"]
+    role: RoleName
     membership_tier: Literal["regular", "vip"] | None = None
 
 
@@ -58,7 +61,7 @@ class ProfileOut(CamelModel):
     date_of_birth: date | None = None
     avatar_url: str | None = None
     bio: str | None = None
-    role: Literal["admin", "member"]
+    role: RoleName
     membership_tier: Literal["regular", "vip"] | None = None
     created_at: datetime
     updated_at: datetime
@@ -121,7 +124,7 @@ class MemberOut(CamelModel):
     id: str
     email: EmailStr
     full_name: str | None = None
-    role: Literal["admin", "member"]
+    role: RoleName
     membership_tier: Literal["regular", "vip"] | None = None
     address: str | None = None
     date_of_birth: date | None = None
@@ -153,3 +156,39 @@ class MemberUpdateRequest(CamelModel):
     address: str | None = None
     date_of_birth: date | None = None
     membership_tier: Literal["regular", "vip"] | None = None
+
+
+class AdminOut(CamelModel):
+    id: str
+    email: EmailStr
+    full_name: str | None = None
+    role: RoleName
+    address: str | None = None
+    date_of_birth: date | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminListResponse(CamelModel):
+    items: list[AdminOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminCreateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    password: str = Field(min_length=8)
+    full_name: str = Field(min_length=1)
+    address: str | None = None
+    date_of_birth: date | None = None
+
+
+class AdminUpdateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: str | None = Field(default=None, min_length=1)
+    address: str | None = None
+    date_of_birth: date | None = None

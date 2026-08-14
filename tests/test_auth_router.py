@@ -13,13 +13,16 @@ client = TestClient(app)
 
 
 def _fake_admin_client(
-    *, profile_data=None, known_login_data=None, admin_role_id="role-admin-id"
+    *,
+    profile_data=None,
+    known_login_data=None,
+    super_admin_role_id="role-super-admin-id",
 ):
     """admin_client() is queried against 3 different tables inside
     login()/refresh() (profiles, known_logins, roles — the last only when
-    promoting to admin). .table() needs a side_effect keyed by table name so
-    each table gets its own independently-configured mock chain instead of
-    colliding on a shared .table.return_value."""
+    bootstrap-promoting to super_admin). .table() needs a side_effect keyed
+    by table name so each table gets its own independently-configured mock
+    chain instead of colliding on a shared .table.return_value."""
     fake_profiles = MagicMock()
     fake_profiles.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = (
         SimpleNamespace(data=profile_data) if profile_data is not None else None
@@ -32,7 +35,7 @@ def _fake_admin_client(
 
     fake_roles = MagicMock()
     fake_roles.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
-        data={"id": admin_role_id}
+        data={"id": super_admin_role_id}
     )
 
     fake_admin = MagicMock()
@@ -52,6 +55,11 @@ MEMBER_PROFILE = {
 }
 ADMIN_PROFILE = {
     "roles": {"name": "admin"},
+    "membership_tier": None,
+    "deleted_at": None,
+}
+SUPER_ADMIN_PROFILE = {
+    "roles": {"name": "super_admin"},
     "membership_tier": None,
     "deleted_at": None,
 }
@@ -240,7 +248,7 @@ def test_login_promotes_initial_admin_email(mocker):
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
     fake_admin, fake_profiles, _, _ = _fake_admin_client(
-        profile_data=MEMBER_PROFILE, admin_role_id="role-admin-id"
+        profile_data=MEMBER_PROFILE, super_admin_role_id="role-super-admin-id"
     )
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch("app.routers.auth.create_notification")
@@ -252,9 +260,9 @@ def test_login_promotes_initial_admin_email(mocker):
     )
 
     assert response.status_code == 200
-    assert response.json()["user"]["role"] == "admin"
+    assert response.json()["user"]["role"] == "super_admin"
     update_call = fake_profiles.update.call_args[0][0]
-    assert update_call == {"role_id": "role-admin-id"}
+    assert update_call == {"role_id": "role-super-admin-id"}
 
 
 def test_login_non_matching_email_does_not_promote(mocker):
@@ -280,7 +288,7 @@ def test_login_non_matching_email_does_not_promote(mocker):
     fake_profiles.update.assert_not_called()
 
 
-def test_login_already_admin_does_not_reissue_update(mocker):
+def test_login_already_super_admin_does_not_reissue_update(mocker):
     fake_client = mocker.MagicMock()
     fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
         user=SimpleNamespace(id="user-1", email="boss@srwiki.dev"),
@@ -288,7 +296,9 @@ def test_login_already_admin_does_not_reissue_update(mocker):
     )
     mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
 
-    fake_admin, fake_profiles, _, _ = _fake_admin_client(profile_data=ADMIN_PROFILE)
+    fake_admin, fake_profiles, _, _ = _fake_admin_client(
+        profile_data=SUPER_ADMIN_PROFILE
+    )
     mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
     mocker.patch("app.routers.auth.create_notification")
     fake_settings = mocker.MagicMock(initial_admin_email="boss@srwiki.dev")
@@ -300,6 +310,35 @@ def test_login_already_admin_does_not_reissue_update(mocker):
 
     assert response.status_code == 200
     fake_profiles.update.assert_not_called()
+
+
+def test_login_plain_admin_still_gets_promoted_to_super_admin(mocker):
+    """The bootstrap email is the root of the system — even a user who is
+    already a plain 'admin' (e.g. promoted separately) must still become
+    super_admin on next login, since only role == 'super_admin' skips it."""
+    fake_client = mocker.MagicMock()
+    fake_client.auth.sign_in_with_password.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="user-1", email="boss@srwiki.dev"),
+        session=SimpleNamespace(access_token="access-tok", refresh_token="refresh-tok"),
+    )
+    mocker.patch("app.routers.auth.anon_client", return_value=fake_client)
+
+    fake_admin, fake_profiles, _, _ = _fake_admin_client(
+        profile_data=ADMIN_PROFILE, super_admin_role_id="role-super-admin-id"
+    )
+    mocker.patch("app.routers.auth.admin_client", return_value=fake_admin)
+    mocker.patch("app.routers.auth.create_notification")
+    fake_settings = mocker.MagicMock(initial_admin_email="boss@srwiki.dev")
+    mocker.patch("app.routers.auth.get_settings", return_value=fake_settings)
+
+    response = client.post(
+        "/auth/login", json={"email": "boss@srwiki.dev", "password": "password123"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["role"] == "super_admin"
+    update_call = fake_profiles.update.call_args[0][0]
+    assert update_call == {"role_id": "role-super-admin-id"}
 
 
 def test_login_new_device_creates_known_login_and_notification(mocker):

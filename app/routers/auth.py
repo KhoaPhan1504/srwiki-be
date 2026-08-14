@@ -83,17 +83,20 @@ def _resolve_role_and_check_active(user_id: str, email: str) -> tuple[str, str |
     role = data["roles"]["name"] if data else "member"
     membership_tier = data["membership_tier"] if data else None
 
-    target_admin_email = get_settings().initial_admin_email
+    # INITIAL_ADMIN_EMAIL bootstraps the single, highest-privilege
+    # super_admin — not a plain admin. Additional admins are created by the
+    # super_admin promoting a member via the UI (POST /admin/members/{id}/promote).
+    target_super_admin_email = get_settings().initial_admin_email
     if (
-        target_admin_email
-        and email.lower() == target_admin_email.lower()
-        and role != "admin"
+        target_super_admin_email
+        and email.lower() == target_super_admin_email.lower()
+        and role != "super_admin"
     ):
-        admin_role_id = get_role_id(admin, "admin")
-        admin.table("profiles").update({"role_id": admin_role_id}).eq(
+        super_admin_role_id = get_role_id(admin, "super_admin")
+        admin.table("profiles").update({"role_id": super_admin_role_id}).eq(
             "id", user_id
         ).execute()
-        role = "admin"
+        role = "super_admin"
         membership_tier = None
 
     return role, membership_tier

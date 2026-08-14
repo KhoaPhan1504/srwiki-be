@@ -32,20 +32,30 @@ def _mock_role(mocker, role="admin", membership_tier=None, deleted_at=None):
 
 
 MEMBER_ROLE_ID = "role-member-id"
+ADMIN_ROLE_ID = "role-admin-id"
 
 
 def _fake_admin_client():
     """admin_client() is queried against 2 different tables inside these
-    endpoints (profiles, roles — the latter to resolve the 'member' role's
-    id via get_role_id()). .table() needs a side_effect keyed by table name
+    endpoints (profiles, roles). get_role_id() is called with different role
+    names within the same request (promote_member needs both 'member' and
+    'admin'), so the roles mock resolves per the queried name instead of
+    returning one fixed id. .table() needs a side_effect keyed by table name
     so each table gets its own independently-configured mock chain instead
     of colliding on a shared .table.return_value."""
     fake_profiles = MagicMock()
 
     fake_roles = MagicMock()
-    fake_roles.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
-        data={"id": MEMBER_ROLE_ID}
-    )
+
+    def _eq_side_effect(_column, role_name):
+        role_id = {"admin": ADMIN_ROLE_ID, "member": MEMBER_ROLE_ID}[role_name]
+        eq_result = MagicMock()
+        eq_result.maybe_single.return_value.execute.return_value = SimpleNamespace(
+            data={"id": role_id}
+        )
+        return eq_result
+
+    fake_roles.select.return_value.eq.side_effect = _eq_side_effect
 
     fake_admin = MagicMock()
     tables = {"profiles": fake_profiles, "roles": fake_roles}
@@ -482,3 +492,50 @@ def test_deleted_member_excluded_from_list(mocker):
     fake_profiles.select.return_value.eq.return_value.is_.assert_called_with(
         "deleted_at", "null"
     )
+
+
+def test_promote_member_rejects_plain_admin(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.post("/admin/members/member-1/promote")
+
+    assert response.status_code == 403
+
+
+def test_promote_member_not_found_returns_404(mocker):
+    _mock_role(mocker, role="super_admin")
+    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fake_profiles.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute.return_value = (
+        None
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.post("/admin/members/missing/promote")
+
+    assert response.status_code == 404
+
+
+def test_promote_member_success(mocker):
+    _mock_role(mocker, role="super_admin")
+    fake_admin, fake_profiles, _ = _fake_admin_client()
+    fetch_with_role_filter = (
+        fake_profiles.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute
+    )
+    fetch_with_role_filter.return_value = SimpleNamespace(data=MEMBER_ROW)
+    fetch_by_id_only = (
+        fake_profiles.select.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute
+    )
+    fetch_by_id_only.return_value = SimpleNamespace(
+        data={**MEMBER_ROW, "roles": {"name": "admin"}, "membership_tier": None}
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.post("/admin/members/member-1/promote")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["role"] == "admin"
+    assert "membershipTier" not in body
+    update_call = fake_profiles.update.call_args[0][0]
+    assert update_call == {"role_id": ADMIN_ROLE_ID, "membership_tier": None}

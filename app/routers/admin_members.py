@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.dependencies import require_permission
 from app.permissions import get_role_id
 from app.schemas import (
+    AdminOut,
     MemberCreateRequest,
     MemberListResponse,
     MemberOut,
@@ -24,6 +25,7 @@ require_members_read = require_permission("members.read")
 require_members_create = require_permission("members.create")
 require_members_update = require_permission("members.update")
 require_members_delete = require_permission("members.delete")
+require_admins_promote = require_permission("admins.promote")
 
 
 def _to_member_row(row: dict) -> dict:
@@ -37,6 +39,23 @@ def _fetch_member_row(admin, member_id: str) -> dict | None:
         .select("*, roles(name)")
         .eq("id", member_id)
         .eq("role_id", member_role_id)
+        .is_("deleted_at", "null")
+        .maybe_single()
+        .execute()
+    )
+    if not result or not result.data:
+        return None
+    return _to_member_row(result.data)
+
+
+def _fetch_profile_by_id(admin, user_id: str) -> dict | None:
+    """Unlike _fetch_member_row, doesn't filter by role_id — used right
+    after a role change (promote), where the row no longer matches the
+    role it had when the request came in."""
+    result = (
+        admin.table("profiles")
+        .select("*, roles(name)")
+        .eq("id", user_id)
         .is_("deleted_at", "null")
         .maybe_single()
         .execute()
@@ -197,3 +216,26 @@ def delete_member(
 
     now = datetime.now(timezone.utc).isoformat()
     admin.table("profiles").update({"deleted_at": now}).eq("id", member_id).execute()
+
+
+@router.post("/{member_id}/promote", response_model=AdminOut)
+def promote_member(
+    member_id: str,
+    _current_user: dict = Depends(require_admins_promote),
+):
+    admin = admin_client()
+    existing = _fetch_member_row(admin, member_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    admin_role_id = get_role_id(admin, "admin")
+    admin.table("profiles").update(
+        {"role_id": admin_role_id, "membership_tier": None}
+    ).eq("id", member_id).execute()
+
+    row = _fetch_profile_by_id(admin, member_id)
+    if row is None:
+        raise HTTPException(
+            status_code=500, detail="Member promoted but could not be fetched"
+        )
+    return AdminOut(**row)
