@@ -262,3 +262,93 @@ def test_list_members_combines_filters_with_and(mocker):
     assert response.status_code == 200
     assert base.in_.call_args[0] == ("membership_tier", ["vip"])
     assert base.in_.return_value.ilike.call_args[0] == ("address", "%Ha Noi%")
+
+
+CREATE_PAYLOAD = {
+    "email": "new@member.com",
+    "password": "password123",
+    "fullName": "New Member",
+    "address": "1 Test St",
+    "dateOfBirth": "1998-03-10",
+}
+
+CREATED_ROW = {
+    "id": "new-member-1",
+    "email": "new@member.com",
+    "full_name": "New Member",
+    "role": "member",
+    "membership_tier": "regular",
+    "address": "1 Test St",
+    "date_of_birth": "1998-03-10",
+    "created_at": "2026-08-14T00:00:00+00:00",
+    "updated_at": "2026-08-14T00:00:00+00:00",
+}
+
+
+def test_create_member_rejects_non_admin(mocker):
+    _mock_role(mocker, role="member")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.post("/admin/members", json=CREATE_PAYLOAD)
+
+    assert response.status_code == 403
+
+
+def test_create_member_success(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    fake_admin.auth.admin.create_user.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="new-member-1", email="new@member.com")
+    )
+    fake_admin.table.return_value.select.return_value.eq.return_value.eq.return_value.is_.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data=CREATED_ROW
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.post("/admin/members", json=CREATE_PAYLOAD)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["role"] == "member"
+    assert body["membershipTier"] == "regular"
+    insert_call = fake_admin.table.return_value.insert.call_args[0][0]
+    assert insert_call["role"] == "member"
+    assert insert_call["membership_tier"] == "regular"
+    assert insert_call["id"] == "new-member-1"
+
+
+def test_create_member_rejects_role_field(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_members.admin_client")
+    payload = {**CREATE_PAYLOAD, "role": "admin"}
+
+    response = client.post("/admin/members", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_create_member_rejects_membership_tier_field(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_members.admin_client")
+    payload = {**CREATE_PAYLOAD, "membershipTier": "vip"}
+
+    response = client.post("/admin/members", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_create_member_rolls_back_user_when_profile_insert_fails(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin = mocker.MagicMock()
+    fake_admin.auth.admin.create_user.return_value = SimpleNamespace(
+        user=SimpleNamespace(id="new-member-1", email="new@member.com")
+    )
+    fake_admin.table.return_value.insert.return_value.execute.side_effect = Exception(
+        "db error"
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.post("/admin/members", json=CREATE_PAYLOAD)
+
+    assert response.status_code == 500
+    fake_admin.auth.admin.delete_user.assert_called_once_with("new-member-1")

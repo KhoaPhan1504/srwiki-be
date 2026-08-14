@@ -1,10 +1,10 @@
 import logging
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.dependencies import require_permission
-from app.schemas import MemberListResponse, MemberOut
+from app.schemas import MemberCreateRequest, MemberListResponse, MemberOut
 from app.supabase_client import admin_client
 
 logger = logging.getLogger(__name__)
@@ -15,6 +15,7 @@ DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 
 require_members_read = require_permission("members.read")
+require_members_create = require_permission("members.create")
 
 
 def _fetch_member_row(admin, member_id: str) -> dict | None:
@@ -88,3 +89,57 @@ def list_members(
         page=page,
         page_size=page_size,
     )
+
+
+@router.post("", status_code=status.HTTP_201_CREATED, response_model=MemberOut)
+def create_member(
+    payload: MemberCreateRequest,
+    _current_user: dict = Depends(require_members_create),
+):
+    admin = admin_client()
+    try:
+        result = admin.auth.admin.create_user(
+            {
+                "email": payload.email,
+                "password": payload.password,
+                "email_confirm": True,
+                "user_metadata": {"full_name": payload.full_name},
+            }
+        )
+    except Exception as exc:
+        logger.exception("create_user failed for %s", payload.email)
+        raise HTTPException(status_code=400, detail="Could not create member") from exc
+
+    user = result.user
+    if user is None:
+        raise HTTPException(status_code=400, detail="Could not create member")
+
+    profile = {
+        "id": user.id,
+        "email": user.email,
+        "full_name": payload.full_name,
+        "address": payload.address,
+        "date_of_birth": (
+            payload.date_of_birth.isoformat() if payload.date_of_birth else None
+        ),
+        "role": "member",
+        "membership_tier": "regular",
+    }
+    try:
+        admin.table("profiles").insert(profile).execute()
+    except Exception as exc:
+        logger.exception("profile insert failed for user_id=%s", user.id)
+        try:
+            admin.auth.admin.delete_user(user.id)
+        except Exception:
+            logger.exception("rollback delete_user failed for user_id=%s", user.id)
+        raise HTTPException(
+            status_code=500, detail="Could not create member profile"
+        ) from exc
+
+    row = _fetch_member_row(admin, user.id)
+    if row is None:
+        raise HTTPException(
+            status_code=500, detail="Member created but could not be fetched"
+        )
+    return MemberOut(**row)
