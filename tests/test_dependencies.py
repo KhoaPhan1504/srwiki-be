@@ -68,7 +68,7 @@ def _mock_profile(mocker, role="member", membership_tier=None, deleted_at=None):
     mock_admin.return_value.auth.get_user.return_value = SimpleNamespace(user=fake_user)
     mock_admin.return_value.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
         data={
-            "role": role,
+            "roles": {"name": role},
             "membership_tier": membership_tier,
             "deleted_at": deleted_at,
         }

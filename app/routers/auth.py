@@ -9,6 +9,7 @@ from postgrest.exceptions import APIError
 from app.config import get_settings
 from app.dependencies import get_current_user
 from app.notifications import create_notification
+from app.permissions import get_role_id
 from app.schemas import (
     AuthResponse,
     LoginRequest,
@@ -70,7 +71,7 @@ def _resolve_role_and_check_active(user_id: str, email: str) -> tuple[str, str |
     admin = admin_client()
     row = (
         admin.table("profiles")
-        .select("role, membership_tier, deleted_at")
+        .select("membership_tier, deleted_at, roles(name)")
         .eq("id", user_id)
         .maybe_single()
         .execute()
@@ -79,7 +80,7 @@ def _resolve_role_and_check_active(user_id: str, email: str) -> tuple[str, str |
     if data and data["deleted_at"] is not None:
         raise HTTPException(status_code=403, detail="Account has been deactivated")
 
-    role = data["role"] if data else "member"
+    role = data["roles"]["name"] if data else "member"
     membership_tier = data["membership_tier"] if data else None
 
     target_admin_email = get_settings().initial_admin_email
@@ -88,7 +89,10 @@ def _resolve_role_and_check_active(user_id: str, email: str) -> tuple[str, str |
         and email.lower() == target_admin_email.lower()
         and role != "admin"
     ):
-        admin.table("profiles").update({"role": "admin"}).eq("id", user_id).execute()
+        admin_role_id = get_role_id(admin, "admin")
+        admin.table("profiles").update({"role_id": admin_role_id}).eq(
+            "id", user_id
+        ).execute()
         role = "admin"
         membership_tier = None
 

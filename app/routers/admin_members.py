@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.dependencies import require_permission
+from app.permissions import get_role_id
 from app.schemas import (
     MemberCreateRequest,
     MemberListResponse,
@@ -25,17 +26,24 @@ require_members_update = require_permission("members.update")
 require_members_delete = require_permission("members.delete")
 
 
+def _to_member_row(row: dict) -> dict:
+    return {**row, "role": row["roles"]["name"]}
+
+
 def _fetch_member_row(admin, member_id: str) -> dict | None:
+    member_role_id = get_role_id(admin, "member")
     result = (
         admin.table("profiles")
-        .select("*")
+        .select("*, roles(name)")
         .eq("id", member_id)
-        .eq("role", "member")
+        .eq("role_id", member_role_id)
         .is_("deleted_at", "null")
         .maybe_single()
         .execute()
     )
-    return result.data if result else None
+    if not result or not result.data:
+        return None
+    return _to_member_row(result.data)
 
 
 @router.get("", response_model=MemberListResponse)
@@ -61,11 +69,12 @@ def list_members(
             status_code=400, detail="createdAtFrom must be <= createdAtTo"
         )
 
+    admin = admin_client()
+    member_role_id = get_role_id(admin, "member")
     query = (
-        admin_client()
-        .table("profiles")
-        .select("*", count="exact")
-        .eq("role", "member")
+        admin.table("profiles")
+        .select("*, roles(name)", count="exact")
+        .eq("role_id", member_role_id)
         .is_("deleted_at", "null")
     )
     if membership_tier:
@@ -91,7 +100,7 @@ def list_members(
     )
 
     return MemberListResponse(
-        items=[MemberOut(**row) for row in result.data],
+        items=[MemberOut(**_to_member_row(row)) for row in result.data],
         total=result.count or 0,
         page=page,
         page_size=page_size,
@@ -129,7 +138,7 @@ def create_member(
         "date_of_birth": (
             payload.date_of_birth.isoformat() if payload.date_of_birth else None
         ),
-        "role": "member",
+        "role_id": get_role_id(admin, "member"),
         "membership_tier": "regular",
     }
     try:

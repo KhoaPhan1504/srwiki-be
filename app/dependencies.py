@@ -25,7 +25,7 @@ def get_current_user_with_role(current_user: dict = Depends(get_current_user)) -
     row = (
         admin_client()
         .table("profiles")
-        .select("role, membership_tier, deleted_at")
+        .select("membership_tier, deleted_at, roles(name)")
         .eq("id", current_user["id"])
         .maybe_single()
         .execute()
@@ -35,7 +35,7 @@ def get_current_user_with_role(current_user: dict = Depends(get_current_user)) -
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     return {
         **current_user,
-        "role": data["role"],
+        "role": data["roles"]["name"],
         "membership_tier": data["membership_tier"],
     }
 
