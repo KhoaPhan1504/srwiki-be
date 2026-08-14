@@ -35,9 +35,11 @@ class RefreshRequest(BaseModel):
     refreshToken: str
 
 
-class UserOut(BaseModel):
+class UserOut(CamelModel):
     id: str
     email: EmailStr
+    role: Literal["admin", "member"]
+    membership_tier: Literal["regular", "vip"] | None = None
 
 
 class AuthResponse(BaseModel):

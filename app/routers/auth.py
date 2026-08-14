@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from postgrest.exceptions import APIError
 
+from app.config import get_settings
 from app.dependencies import get_current_user
 from app.notifications import create_notification
 from app.schemas import (
@@ -65,6 +66,35 @@ def register(payload: RegisterRequest):
     return {"id": user.id, "email": user.email}
 
 
+def _resolve_role_and_check_active(user_id: str, email: str) -> tuple[str, str | None]:
+    admin = admin_client()
+    row = (
+        admin.table("profiles")
+        .select("role, membership_tier, deleted_at")
+        .eq("id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    data = row.data if row else None
+    if data and data["deleted_at"] is not None:
+        raise HTTPException(status_code=403, detail="Account has been deactivated")
+
+    role = data["role"] if data else "member"
+    membership_tier = data["membership_tier"] if data else None
+
+    target_admin_email = get_settings().initial_admin_email
+    if (
+        target_admin_email
+        and email.lower() == target_admin_email.lower()
+        and role != "admin"
+    ):
+        admin.table("profiles").update({"role": "admin"}).eq("id", user_id).execute()
+        role = "admin"
+        membership_tier = None
+
+    return role, membership_tier
+
+
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest, request: Request):
     client = anon_client()
@@ -82,6 +112,8 @@ def login(payload: LoginRequest, request: Request):
     if session is None or user is None:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    role, membership_tier = _resolve_role_and_check_active(user.id, user.email)
+
     try:
         _track_login_device(request, user.id)
     except Exception:
@@ -90,7 +122,9 @@ def login(payload: LoginRequest, request: Request):
     return AuthResponse(
         token=session.access_token,
         refreshToken=session.refresh_token,
-        user=UserOut(id=user.id, email=user.email),
+        user=UserOut(
+            id=user.id, email=user.email, role=role, membership_tier=membership_tier
+        ),
     )
 
 
@@ -178,10 +212,14 @@ def refresh(payload: RefreshRequest):
     if session is None or user is None:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
+    role, membership_tier = _resolve_role_and_check_active(user.id, user.email)
+
     return AuthResponse(
         token=session.access_token,
         refreshToken=session.refresh_token,
-        user=UserOut(id=user.id, email=user.email),
+        user=UserOut(
+            id=user.id, email=user.email, role=role, membership_tier=membership_tier
+        ),
     )
 
 
