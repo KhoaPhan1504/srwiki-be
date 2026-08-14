@@ -115,3 +115,41 @@ class NotificationOut(CamelModel):
 
 class MarkAllReadResponse(CamelModel):
     marked_count: int
+
+
+class MemberOut(CamelModel):
+    id: str
+    email: EmailStr
+    full_name: str | None = None
+    role: Literal["admin", "member"]
+    membership_tier: Literal["regular", "vip"] | None = None
+    address: str | None = None
+    date_of_birth: date | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemberListResponse(CamelModel):
+    items: list[MemberOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class MemberCreateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    password: str = Field(min_length=8)
+    full_name: str = Field(min_length=1)
+    address: str | None = None
+    date_of_birth: date | None = None
+
+
+class MemberUpdateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: str | None = Field(default=None, min_length=1)
+    address: str | None = None
+    date_of_birth: date | None = None
+    membership_tier: Literal["regular", "vip"] | None = None
