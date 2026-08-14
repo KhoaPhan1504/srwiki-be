@@ -20,6 +20,11 @@ client = TestClient(app)
 
 PROFILE_ROW = {
     "id": "user-1",
+    # Deliberately different from the "a@b.com" current_user email used
+    # throughout this file's tests — profiles.email is a denormalized copy
+    # (see migration 0008) that the GET/PUT /profile response must NOT use;
+    # the live Supabase Auth token email (current_user["email"]) must win.
+    "email": "stale-row-email@example.com",
     "full_name": "A B",
     "phone": None,
     "phone_verified": False,

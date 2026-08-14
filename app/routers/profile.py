@@ -29,7 +29,13 @@ def _fetch_profile_row(client, user_id: str) -> dict:
     # postgrest-py returns None (not a response object) when zero rows match.
     if result is None or not result.data:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return result.data
+    # profiles.email (migration 0008) is a denormalized copy for admin
+    # listing/filtering — every caller here builds ProfileOut with the live
+    # Supabase Auth token email instead (email=current_user["email"]), so
+    # drop the column here rather than colliding with that kwarg below.
+    row = dict(result.data)
+    row.pop("email", None)
+    return row
 
 
 @router.get("", response_model=ProfileOut)
