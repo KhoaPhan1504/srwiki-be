@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from postgrest.exceptions import APIError
 
+from app.config import get_settings
 from app.dependencies import get_current_user
 from app.notifications import create_notification
+from app.permissions import RoleId
 from app.schemas import (
     AuthResponse,
     LoginRequest,
@@ -50,7 +52,7 @@ def register(payload: RegisterRequest):
 
     try:
         admin_client().table("profiles").insert(
-            {"id": user.id, "full_name": payload.full_name}
+            {"id": user.id, "email": user.email, "full_name": payload.full_name}
         ).execute()
     except Exception as exc:
         logger.exception("profile insert failed for user_id=%s", user.id)
@@ -63,6 +65,40 @@ def register(payload: RegisterRequest):
         ) from exc
 
     return {"id": user.id, "email": user.email}
+
+
+def _resolve_role_and_check_active(user_id: str, email: str) -> tuple[str, str | None]:
+    admin = admin_client()
+    row = (
+        admin.table("profiles")
+        .select("membership_tier, deleted_at, roles(name)")
+        .eq("id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    data = row.data if row else None
+    if data and data["deleted_at"] is not None:
+        raise HTTPException(status_code=403, detail="Account has been deactivated")
+
+    role = data["roles"]["name"] if data else "member"
+    membership_tier = data["membership_tier"] if data else None
+
+    # INITIAL_ADMIN_EMAIL bootstraps the single, highest-privilege
+    # super_admin — not a plain admin. Additional admins are created by the
+    # super_admin promoting a member via the UI (POST /admin/members/{id}/promote).
+    target_super_admin_email = get_settings().initial_admin_email
+    if (
+        target_super_admin_email
+        and email.lower() == target_super_admin_email.lower()
+        and role != "super_admin"
+    ):
+        admin.table("profiles").update({"role_id": RoleId.SUPER_ADMIN}).eq(
+            "id", user_id
+        ).execute()
+        role = "super_admin"
+        membership_tier = None
+
+    return role, membership_tier
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -82,6 +118,8 @@ def login(payload: LoginRequest, request: Request):
     if session is None or user is None:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
+    role, membership_tier = _resolve_role_and_check_active(user.id, user.email)
+
     try:
         _track_login_device(request, user.id)
     except Exception:
@@ -90,7 +128,9 @@ def login(payload: LoginRequest, request: Request):
     return AuthResponse(
         token=session.access_token,
         refreshToken=session.refresh_token,
-        user=UserOut(id=user.id, email=user.email),
+        user=UserOut(
+            id=user.id, email=user.email, role=role, membership_tier=membership_tier
+        ),
     )
 
 
@@ -178,10 +218,14 @@ def refresh(payload: RefreshRequest):
     if session is None or user is None:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
+    role, membership_tier = _resolve_role_and_check_active(user.id, user.email)
+
     return AuthResponse(
         token=session.access_token,
         refreshToken=session.refresh_token,
-        user=UserOut(id=user.id, email=user.email),
+        user=UserOut(
+            id=user.id, email=user.email, role=role, membership_tier=membership_tier
+        ),
     )
 
 

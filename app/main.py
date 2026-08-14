@@ -2,7 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import auth, notifications, profile, settings
+from app.routers import (
+    admin_admins,
+    admin_members,
+    auth,
+    notifications,
+    profile,
+    settings,
+)
 
 
 def create_app() -> FastAPI:
@@ -19,6 +26,8 @@ def create_app() -> FastAPI:
     app.include_router(profile.router)
     app.include_router(settings.router)
     app.include_router(notifications.router)
+    app.include_router(admin_members.router)
+    app.include_router(admin_admins.router)
 
     @app.get("/health")
     def health():

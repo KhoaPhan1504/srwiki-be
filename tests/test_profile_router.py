@@ -20,6 +20,11 @@ client = TestClient(app)
 
 PROFILE_ROW = {
     "id": "user-1",
+    # Deliberately different from the "a@b.com" current_user email used
+    # throughout this file's tests — profiles.email is a denormalized copy
+    # (see migration 0008) that the GET/PUT /profile response must NOT use;
+    # the live Supabase Auth token email (current_user["email"]) must win.
+    "email": "stale-row-email@example.com",
     "full_name": "A B",
     "phone": None,
     "phone_verified": False,
@@ -27,6 +32,8 @@ PROFILE_ROW = {
     "date_of_birth": None,
     "created_at": "2026-08-05T00:00:00Z",
     "updated_at": "2026-08-05T00:00:00Z",
+    "roles": {"name": "member"},
+    "membership_tier": "regular",
 }
 
 
@@ -321,3 +328,18 @@ def test_upload_avatar_succeeds_even_if_notification_fails(mocker):
 
     assert response.status_code == 200
     assert response.json()["avatarUrl"]
+
+
+def test_get_profile_includes_role_and_membership_tier(mocker):
+    fake_client = mocker.MagicMock()
+    fake_client.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data=PROFILE_ROW
+    )
+    mocker.patch("app.routers.profile.user_client", return_value=fake_client)
+
+    response = client.get("/profile")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["role"] == "member"
+    assert body["membershipTier"] == "regular"
