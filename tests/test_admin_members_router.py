@@ -253,6 +253,69 @@ def test_list_members_combines_filters_with_and(mocker):
     assert base.in_.return_value.ilike.call_args[0] == ("address", "%Ha Noi%")
 
 
+def test_list_members_sorts_by_full_name_ascending(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin, fake_profiles = _fake_admin_client()
+    query = fake_profiles.select.return_value.eq.return_value.is_.return_value
+    query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/members?sortBy=fullName&sortDirection=asc")
+
+    assert response.status_code == 200
+    query.order.assert_called_once_with("full_name", desc=False)
+
+
+def test_list_members_default_sort_is_created_at_desc(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin, fake_profiles = _fake_admin_client()
+    query = fake_profiles.select.return_value.eq.return_value.is_.return_value
+    query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/members")
+
+    assert response.status_code == 200
+    query.order.assert_called_once_with("created_at", desc=True)
+
+
+def test_list_members_sort_direction_defaults_to_desc(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin, fake_profiles = _fake_admin_client()
+    query = fake_profiles.select.return_value.eq.return_value.is_.return_value
+    query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_members.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/members?sortBy=email")
+
+    assert response.status_code == 200
+    query.order.assert_called_once_with("email", desc=True)
+
+
+def test_list_members_invalid_sort_by_returns_400(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.get("/admin/members?sortBy=role")
+
+    assert response.status_code == 400
+
+
+def test_list_members_invalid_sort_direction_returns_422(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_members.admin_client")
+
+    response = client.get("/admin/members?sortBy=email&sortDirection=upward")
+
+    assert response.status_code == 422
+
+
 CREATE_PAYLOAD = {
     "email": "new@member.com",
     "password": "password123",

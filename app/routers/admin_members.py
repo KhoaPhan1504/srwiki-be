@@ -21,6 +21,14 @@ router = APIRouter(prefix="/admin/members", tags=["admin-members"])
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 
+SORTABLE_MEMBER_COLUMNS = {
+    "fullName": "full_name",
+    "email": "email",
+    "membershipTier": "membership_tier",
+    "createdAt": "created_at",
+    "dateOfBirth": "date_of_birth",
+}
+
 require_members_read = require_permission("members.read")
 require_members_create = require_permission("members.create")
 require_members_update = require_permission("members.update")
@@ -76,6 +84,10 @@ def list_members(
     address: str | None = Query(default=None),
     birthday_from: date | None = Query(default=None, alias="birthdayFrom"),
     birthday_to: date | None = Query(default=None, alias="birthdayTo"),
+    sort_by: str | None = Query(default=None, alias="sortBy"),
+    sort_direction: str = Query(
+        default="desc", alias="sortDirection", pattern="^(asc|desc)$"
+    ),
     _current_user: dict = Depends(require_members_read),
 ):
     if birthday_from and birthday_to and birthday_from > birthday_to:
@@ -86,6 +98,8 @@ def list_members(
         raise HTTPException(
             status_code=400, detail="createdAtFrom must be <= createdAtTo"
         )
+    if sort_by is not None and sort_by not in SORTABLE_MEMBER_COLUMNS:
+        raise HTTPException(status_code=400, detail="Invalid sortBy value")
 
     admin = admin_client()
     query = (
@@ -109,9 +123,12 @@ def list_members(
     if birthday_to:
         query = query.lte("date_of_birth", birthday_to.isoformat())
 
+    order_column = SORTABLE_MEMBER_COLUMNS.get(sort_by, "created_at")
+    order_desc = sort_direction == "desc" if sort_by else True
+
     offset = (page - 1) * page_size
     result = (
-        query.order("created_at", desc=True)
+        query.order(order_column, desc=order_desc)
         .range(offset, offset + page_size - 1)
         .execute()
     )
