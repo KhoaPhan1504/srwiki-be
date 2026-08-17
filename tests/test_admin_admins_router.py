@@ -92,6 +92,104 @@ def test_list_admins_returns_empty_list(mocker):
     assert response.json()["items"] == []
 
 
+def test_list_admins_sorts_by_full_name_ascending(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin, fake_profiles = _fake_admin_client()
+    query = fake_profiles.select.return_value.eq.return_value.is_.return_value
+    query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_admins.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/admins?sortBy=fullName&sortDirection=asc")
+
+    assert response.status_code == 200
+    query.order.assert_called_once_with("full_name", desc=False)
+
+
+def test_list_admins_default_sort_is_created_at_desc(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin, fake_profiles = _fake_admin_client()
+    query = fake_profiles.select.return_value.eq.return_value.is_.return_value
+    query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_admins.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/admins")
+
+    assert response.status_code == 200
+    query.order.assert_called_once_with("created_at", desc=True)
+
+
+def test_list_admins_invalid_sort_by_returns_400(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_admins.admin_client")
+
+    response = client.get("/admin/admins?sortBy=role")
+
+    assert response.status_code == 400
+
+
+def test_list_admins_filters_address_contains(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin, fake_profiles = _fake_admin_client()
+    base = fake_profiles.select.return_value.eq.return_value.is_.return_value
+    base.ilike.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_admins.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/admins?address=Ha+Noi")
+
+    assert response.status_code == 200
+    assert base.ilike.call_args[0] == ("address", "%Ha Noi%")
+
+
+def test_list_admins_filters_created_at_range(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin, fake_profiles = _fake_admin_client()
+    base = fake_profiles.select.return_value.eq.return_value.is_.return_value
+    base.gte.return_value.lt.return_value.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_admins.admin_client", return_value=fake_admin)
+
+    response = client.get(
+        "/admin/admins?createdAtFrom=2026-01-01T00:00:00Z&createdAtTo=2026-08-15T00:00:00Z"
+    )
+
+    assert response.status_code == 200
+    assert base.gte.call_args[0][0] == "created_at"
+    assert base.gte.return_value.lt.call_args[0][0] == "created_at"
+
+
+def test_list_admins_invalid_created_at_range_returns_400(mocker):
+    _mock_role(mocker, role="admin")
+    mocker.patch("app.routers.admin_admins.admin_client")
+
+    response = client.get(
+        "/admin/admins?createdAtFrom=2026-08-15T00:00:00Z&createdAtTo=2026-01-01T00:00:00Z"
+    )
+
+    assert response.status_code == 400
+
+
+def test_list_admins_no_filter_skips_in_call(mocker):
+    _mock_role(mocker, role="admin")
+    fake_admin, fake_profiles = _fake_admin_client()
+    query = fake_profiles.select.return_value.eq.return_value.is_.return_value
+    query.order.return_value.range.return_value.execute.return_value = SimpleNamespace(
+        data=[], count=0
+    )
+    mocker.patch("app.routers.admin_admins.admin_client", return_value=fake_admin)
+
+    response = client.get("/admin/admins")
+
+    assert response.status_code == 200
+    query.ilike.assert_not_called()
+
+
 CREATE_PAYLOAD = {
     "email": "new-admin@b.com",
     "password": "password123",
