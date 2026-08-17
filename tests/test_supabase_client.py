@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock
+
 import app.supabase_client as sc
 from app.config import get_settings
 
@@ -6,12 +7,14 @@ from app.config import get_settings
 def test_anon_client_uses_anon_key(mocker):
     sc.anon_client.cache_clear()
     fake_client = MagicMock()
-    mock_create = mocker.patch("app.supabase_client.create_client", return_value=fake_client)
+    mock_create = mocker.patch(
+        "app.supabase_client.create_client", return_value=fake_client
+    )
 
     result = sc.anon_client()
 
     settings = get_settings()
-    args, kwargs = mock_create.call_args
+    args, _kwargs = mock_create.call_args
     assert args == (settings.supabase_url, settings.supabase_anon_key)
     assert result is fake_client
     sc.anon_client.cache_clear()
@@ -19,7 +22,9 @@ def test_anon_client_uses_anon_key(mocker):
 
 def test_anon_client_disables_session_state(mocker):
     sc.anon_client.cache_clear()
-    mock_create = mocker.patch("app.supabase_client.create_client", return_value=MagicMock())
+    mock_create = mocker.patch(
+        "app.supabase_client.create_client", return_value=MagicMock()
+    )
 
     sc.anon_client()
 
@@ -32,19 +37,25 @@ def test_anon_client_disables_session_state(mocker):
 def test_admin_client_uses_service_role_key(mocker):
     sc.admin_client.cache_clear()
     fake_client = MagicMock()
-    mock_create = mocker.patch("app.supabase_client.create_client", return_value=fake_client)
+    mock_create = mocker.patch(
+        "app.supabase_client.create_client", return_value=fake_client
+    )
 
     result = sc.admin_client()
 
     settings = get_settings()
-    mock_create.assert_called_once_with(settings.supabase_url, settings.supabase_service_role_key)
+    mock_create.assert_called_once_with(
+        settings.supabase_url, settings.supabase_service_role_key
+    )
     assert result is fake_client
     sc.admin_client.cache_clear()
 
 
 def test_user_client_attaches_access_token(mocker):
     fake_client = MagicMock()
-    mock_create = mocker.patch("app.supabase_client.create_client", return_value=fake_client)
+    mock_create = mocker.patch(
+        "app.supabase_client.create_client", return_value=fake_client
+    )
 
     result = sc.user_client("token-123")
 

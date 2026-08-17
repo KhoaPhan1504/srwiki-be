@@ -1,5 +1,6 @@
 import pytest
-from app.phone import validate_phone_e164, InvalidPhoneNumberError
+
+from app.phone import InvalidPhoneNumberError, validate_phone_e164
 
 
 def test_valid_vietnam_number_returns_e164():
