@@ -21,6 +21,12 @@ router = APIRouter(prefix="/admin/admins", tags=["admin-admins"])
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 100
 
+SORTABLE_ADMIN_COLUMNS = {
+    "fullName": "full_name",
+    "email": "email",
+    "createdAt": "created_at",
+}
+
 require_admins_read = require_permission("admins.read")
 require_admins_create = require_permission("admins.create")
 require_admins_update = require_permission("admins.update")
@@ -70,8 +76,22 @@ def list_admins(
     page_size: int = Query(
         default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, alias="pageSize"
     ),
+    sort_by: str | None = Query(default=None, alias="sortBy"),
+    sort_direction: str = Query(
+        default="desc", alias="sortDirection", pattern="^(asc|desc)$"
+    ),
+    address: str | None = Query(default=None),
+    created_at_from: datetime | None = Query(default=None, alias="createdAtFrom"),
+    created_at_to: datetime | None = Query(default=None, alias="createdAtTo"),
     _current_user: dict = Depends(require_admins_read),
 ):
+    if sort_by is not None and sort_by not in SORTABLE_ADMIN_COLUMNS:
+        raise HTTPException(status_code=400, detail="Invalid sortBy value")
+    if created_at_from and created_at_to and created_at_from > created_at_to:
+        raise HTTPException(
+            status_code=400, detail="createdAtFrom must be <= createdAtTo"
+        )
+
     admin = admin_client()
     query = (
         admin.table("profiles")
@@ -79,9 +99,19 @@ def list_admins(
         .eq("role_id", RoleId.ADMIN)
         .is_("deleted_at", "null")
     )
+    if address:
+        query = query.ilike("address", f"%{address}%")
+    if created_at_from:
+        query = query.gte("created_at", created_at_from.isoformat())
+    if created_at_to:
+        query = query.lt("created_at", created_at_to.isoformat())
+
+    order_column = SORTABLE_ADMIN_COLUMNS.get(sort_by, "created_at")
+    order_desc = sort_direction == "desc" if sort_by else True
+
     offset = (page - 1) * page_size
     result = (
-        query.order("created_at", desc=True)
+        query.order(order_column, desc=order_desc)
         .range(offset, offset + page_size - 1)
         .execute()
     )
