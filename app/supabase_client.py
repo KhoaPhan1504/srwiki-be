@@ -1,6 +1,7 @@
 from functools import lru_cache
-from supabase import create_client, Client, ClientOptions
+
 from app.config import get_settings
+from supabase import Client, ClientOptions, create_client
 
 
 @lru_cache
@@ -15,7 +16,9 @@ def anon_client() -> Client:
     """
     settings = get_settings()
     options = ClientOptions(auto_refresh_token=False, persist_session=False)
-    return create_client(settings.supabase_url, settings.supabase_anon_key, options=options)
+    return create_client(
+        settings.supabase_url, settings.supabase_anon_key, options=options
+    )
 
 
 @lru_cache
@@ -27,4 +30,6 @@ def admin_client() -> Client:
 def user_client(access_token: str) -> Client:
     settings = get_settings()
     options = ClientOptions(headers={"Authorization": f"Bearer {access_token}"})
-    return create_client(settings.supabase_url, settings.supabase_anon_key, options=options)
+    return create_client(
+        settings.supabase_url, settings.supabase_anon_key, options=options
+    )
