@@ -192,3 +192,95 @@ class AdminUpdateRequest(CamelModel):
     full_name: str | None = Field(default=None, min_length=1)
     address: str | None = None
     date_of_birth: date | None = None
+
+
+class SavedRequestOut(CamelModel):
+    id: str
+    collection_id: str
+    name: str
+    method: str
+    url: str
+    query_params: list[dict]
+    headers: list[dict]
+    body: str
+    body_type: str
+    body_fields: list[dict]
+    auth: dict
+    created_at: datetime
+    updated_at: datetime
+
+
+class CollectionOut(CamelModel):
+    id: str
+    name: str
+    created_at: datetime
+    requests: list[SavedRequestOut]
+
+
+class CollectionCreateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=100)
+
+
+class CollectionUpdateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=100)
+
+
+RestHttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
+RestBodyType = Literal["raw", "urlEncoded", "formData"]
+
+
+class SavedRequestCreateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=100)
+    method: RestHttpMethod
+    url: str = Field(min_length=1)
+    query_params: list[dict] = Field(default_factory=list)
+    headers: list[dict] = Field(default_factory=list)
+    body: str = ""
+    body_type: RestBodyType = "raw"
+    body_fields: list[dict] = Field(default_factory=list)
+    auth: dict = Field(default_factory=lambda: {"type": "none"})
+
+
+class SavedRequestUpdateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    method: RestHttpMethod | None = None
+    url: str | None = None
+    query_params: list[dict] | None = None
+    headers: list[dict] | None = None
+    body: str | None = None
+    body_type: RestBodyType | None = None
+    body_fields: list[dict] | None = None
+    auth: dict | None = None
+
+
+class EnvironmentOut(CamelModel):
+    id: str
+    name: str
+    variables: list[dict]
+    created_at: datetime
+    updated_at: datetime
+
+
+class EnvironmentCreateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=100)
+    variables: list[dict] = Field(default_factory=list)
+
+
+class EnvironmentUpdateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    variables: list[dict] | None = None
+
+
+class GlobalVariablesOut(CamelModel):
+    variables: list[dict]
+
+
+class GlobalVariablesUpdateRequest(CamelModel):
+    model_config = ConfigDict(extra="forbid")
+    variables: list[dict]
