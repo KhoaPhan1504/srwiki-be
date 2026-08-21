@@ -8,6 +8,8 @@ from app.routers import (
     auth,
     notifications,
     profile,
+    rest_collections,
+    rest_environments,
     settings,
 )
 
@@ -26,6 +28,8 @@ def create_app() -> FastAPI:
     app.include_router(profile.router)
     app.include_router(settings.router)
     app.include_router(notifications.router)
+    app.include_router(rest_collections.router)
+    app.include_router(rest_environments.router)
     app.include_router(admin_members.router)
     app.include_router(admin_admins.router)
 
