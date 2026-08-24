@@ -284,3 +284,23 @@ class GlobalVariablesOut(CamelModel):
 class GlobalVariablesUpdateRequest(CamelModel):
     model_config = ConfigDict(extra="forbid")
     variables: list[dict]
+
+
+class HeaderInspectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str = Field(min_length=1, max_length=2048)
+
+
+class HeaderEntryOut(CamelModel):
+    name: str
+    value: str
+
+
+class HeaderInspectionResponse(CamelModel):
+    status_code: int
+    reason_phrase: str
+    headers: list[HeaderEntryOut]
+    final_url: str
+    redirect_count: int
+    duration_ms: float
+    http_version: str

@@ -6,6 +6,7 @@ from app.routers import (
     admin_admins,
     admin_members,
     auth,
+    headers_inspector,
     notifications,
     profile,
     rest_collections,
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.include_router(notifications.router)
     app.include_router(rest_collections.router)
     app.include_router(rest_environments.router)
+    app.include_router(headers_inspector.router)
     app.include_router(admin_members.router)
     app.include_router(admin_admins.router)
 
