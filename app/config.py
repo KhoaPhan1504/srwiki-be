@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     otp_debug_mode: bool = True
     cors_origins: str = "http://localhost:5173"
     initial_admin_email: str | None = None
+    anthropic_api_key: str | None = None
+    gemini_api_key: str | None = None
+    chatgpt_api_key: str | None = None
+    open_router_api_key: str | None = None
+    openweather_api_key: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -32,6 +32,7 @@ cp .env.template .env
 | `SUPABASE_SERVICE_ROLE_KEY` | `service_role`/`secret` key, same page — never expose this client-side |
 | `OTP_DEBUG_MODE` | `true` in dev: `POST /profile/phone/send-otp` echoes the generated code back in the response (no SMS provider is wired up yet) and logs it to the console. Set `false` once a real SMS provider is in place. |
 | `CORS_ORIGINS` | Comma-separated list of allowed frontend origins, e.g. `http://localhost:5173,https://srwiki-fe.netlify.app` |
+| `ANTHROPIC_API_KEY` | Claude API key for `POST /ai/chat`, from the [Anthropic Console](https://console.anthropic.com/). Optional in dev — `/ai/chat` degrades to an apology reply if unset or if the call fails. |
 
 ## Supabase setup
 
