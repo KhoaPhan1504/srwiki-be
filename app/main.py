@@ -5,6 +5,8 @@ from app.config import get_settings
 from app.routers import (
     admin_admins,
     admin_members,
+    ai,
+    ai_conversations,
     auth,
     headers_inspector,
     notifications,
@@ -34,6 +36,8 @@ def create_app() -> FastAPI:
     app.include_router(headers_inspector.router)
     app.include_router(admin_members.router)
     app.include_router(admin_admins.router)
+    app.include_router(ai.router)
+    app.include_router(ai_conversations.router)
 
     @app.get("/health")
     def health():

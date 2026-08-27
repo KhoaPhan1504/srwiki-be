@@ -1,6 +1,6 @@
 import warnings
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from pydantic.alias_generators import to_camel
@@ -304,3 +304,108 @@ class HeaderInspectionResponse(CamelModel):
     redirect_count: int
     duration_ms: float
     http_version: str
+
+
+class UserMessage(CamelModel):
+    role: Literal["user"] = "user"
+    content: str
+
+
+class AssistantReplyTurn(CamelModel):
+    type: Literal["reply"] = "reply"
+    content: str
+
+
+class AssistantToolCallTurn(CamelModel):
+    type: Literal["tool_call"] = "tool_call"
+    tool_call_id: str
+    tool_name: str
+    tool_input: dict
+    provider_data: str | None = None
+
+
+AssistantTurn = Annotated[
+    AssistantReplyTurn | AssistantToolCallTurn,
+    Field(discriminator="type"),
+]
+
+
+class AssistantMessage(CamelModel):
+    role: Literal["assistant"] = "assistant"
+    turns: list[AssistantTurn] = Field(min_length=1)
+    model: str | None = None
+
+
+class ToolDescriptor(CamelModel):
+    name: str
+    description: str
+    input_schema: dict
+
+
+class ToolResultMessage(CamelModel):
+    role: Literal["tool_result"] = "tool_result"
+    tool_call_id: str
+    result: dict
+
+
+ChatMessage = Annotated[
+    UserMessage | AssistantMessage | ToolResultMessage,
+    Field(discriminator="role"),
+]
+
+
+class AiChatRequest(CamelModel):
+    messages: list[ChatMessage] = Field(min_length=1)
+    tools: list[ToolDescriptor] = Field(default_factory=list)
+    model: str
+
+
+class AiChatResponse(CamelModel):
+    turns: list[AssistantTurn] = Field(min_length=1)
+
+
+class ModelOut(CamelModel):
+    id: str
+    label: str
+    provider: str
+
+
+class ModelsResponse(CamelModel):
+    models: list[ModelOut]
+
+
+class ConversationSummary(CamelModel):
+    id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConversationCreateRequest(CamelModel):
+    title: str = Field(default="New conversation", min_length=1, max_length=200)
+
+
+class ConversationRenameRequest(CamelModel):
+    title: str = Field(min_length=1, max_length=200)
+
+
+class ConversationMessageOut(CamelModel):
+    id: str
+    payload: ChatMessage
+    created_at: datetime
+
+
+class ConversationDetail(CamelModel):
+    id: str
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    messages: list[ConversationMessageOut]
+
+
+class AppendMessagesRequest(CamelModel):
+    messages: list[ChatMessage] = Field(min_length=1)
+
+
+class AppendMessagesResponse(CamelModel):
+    messages: list[ConversationMessageOut]
