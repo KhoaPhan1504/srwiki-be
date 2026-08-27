@@ -409,3 +409,33 @@ class AppendMessagesRequest(CamelModel):
 
 class AppendMessagesResponse(CamelModel):
     messages: list[ConversationMessageOut]
+
+
+class WeatherRequest(CamelModel):
+    mode: Literal["current", "forecast"]
+    city: str = Field(min_length=1)
+
+
+class CurrentWeatherOut(CamelModel):
+    mode: Literal["current"] = "current"
+    city: str
+    country: str
+    temperature_c: float
+    feels_like_c: float
+    description: str
+    humidity_percent: int
+    wind_speed_ms: float
+
+
+class DailyForecastOut(CamelModel):
+    date: str
+    min_temperature_c: float
+    max_temperature_c: float
+    description: str
+
+
+class ForecastOut(CamelModel):
+    mode: Literal["forecast"] = "forecast"
+    city: str
+    country: str
+    days: list[DailyForecastOut]
